@@ -15,7 +15,9 @@
 """Claude Code runs the plugin with whatever ``python3`` is on ``PATH``.
 
 On macOS that is often the system Python 3.9, so the plugin entry points must
-run there with only the standard library.
+run there with only the standard library. CI installs Python 3.9 and passes
+``--require-claude-code-python-floor``, so the test fails there instead of
+skipping.
 
 The entry points fail open, so an error on Python 3.9 would still exit 0. Each
 test runs one entry point against a local stand-in for the Server and checks
@@ -33,6 +35,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from shutil import which
 from threading import Thread
+from typing import NoReturn
 
 import pytest
 
@@ -95,11 +98,17 @@ _RESPONSES: dict[str, tuple[int, object]] = {
 }
 
 
+def _unavailable(request: pytest.FixtureRequest, reason: str) -> NoReturn:
+    if request.config.getoption("--require-claude-code-python-floor"):
+        pytest.fail(reason)
+    pytest.skip(reason)
+
+
 @pytest.fixture(scope="module")
-def python_floor() -> str:
+def python_floor(request: pytest.FixtureRequest) -> str:
     uv = which("uv")
     if uv is None:
-        pytest.skip("uv is required to locate a Python 3.9 interpreter")
+        _unavailable(request, "uv is required to locate a Python 3.9 interpreter")
     # `uv python find` only searches installed interpreters; it never downloads one.
     result = subprocess.run(
         [uv, "python", "find", "--no-project", "3.9"],
@@ -108,7 +117,7 @@ def python_floor() -> str:
         timeout=30,
     )
     if result.returncode != 0:
-        pytest.skip("no Python 3.9 interpreter is installed")
+        _unavailable(request, "no Python 3.9 interpreter is installed")
     return result.stdout.strip()
 
 
