@@ -14,8 +14,8 @@
 
 """Hosts that recall with the end of a long prompt bound the query the same way.
 
-Claude Code and Codex share the helper tested here. The TypeScript hosts, Kimi Code, ZCode, and
-the Bub harness tests read the same fixture.
+Claude Code, Codex, and WorkBuddy share the helper tested here. The TypeScript hosts, Kimi Code,
+ZCode, and the Bub harness tests read the same fixture.
 """
 
 from __future__ import annotations
