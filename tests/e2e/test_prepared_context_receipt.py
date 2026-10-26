@@ -97,6 +97,18 @@ def test_http_and_sdk_receipt_matches_injected_memory_and_empty_query(tmp_path, 
                 group["family"] == "atomic-memory" and group["mode"] == "fts" and group["outcome"] == "completed"
                 for group in receipt["retrieval"]["searches"]
             )
+            experience_only = await transport.post(
+                "/v1/context/prepare",
+                json={
+                    **base,
+                    "assembly": {"sections": [{"family": "experience", "limit": 1}]},
+                    "include_receipt": True,
+                },
+            )
+            assert experience_only.status_code == 200
+            experience_searches = experience_only.json()["receipt"]["retrieval"]["searches"]
+            assert all(group["family"] != "atomic-memory" for group in experience_searches)
+            assert any(group["family"] == "experience" for group in experience_searches)
             assert len(json.dumps(receipt, ensure_ascii=False, separators=(",", ":")).encode("utf-8")) <= 8192
             parsed = await client.prepare_context(
                 PrepareContextRequest(scope_id=scope_id, query=query, include_receipt=True)

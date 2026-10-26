@@ -1699,6 +1699,8 @@ class ScopedContextApplication:
                 request,
                 memory_limit=memory_limit,
                 experience_limit=builder.experience_candidate_limit if EXPERIENCE_FAMILY in families else 0,
+                memory_requested=MEMORY_FAMILY in families,
+                experience_requested=EXPERIENCE_FAMILY in families,
                 admission=admission,
                 reuse=reuse.get(scope_id, shared_embedding),
                 allow_embedding=scope_id not in reuse or reuse[scope_id] is not None,
@@ -1790,6 +1792,8 @@ class ScopedContextApplication:
         *,
         memory_limit: int,
         experience_limit: int,
+        memory_requested: bool,
+        experience_requested: bool,
         admission: AdmissionFloor | None,
         reuse: MemoryQueryEmbedding | None,
         allow_embedding: bool = True,
@@ -1825,7 +1829,7 @@ class ScopedContextApplication:
                             _trace=False,
                         )
                     except Exception:
-                        if evidence is not None and started_memory is not None:
+                        if evidence is not None and started_memory is not None and memory_requested:
                             evidence.stage(_MEMORY_SEARCH_STAGE, (perf_counter() - started_memory) * 1000)
                             evidence.search("atomic-memory", None, "failed")
                         raise
@@ -1846,7 +1850,7 @@ class ScopedContextApplication:
                     if search_mode is not None:
                         attributes[_MEMORY_SEARCH_MODE] = search_mode
                     span.set_attributes(attributes)
-            if evidence is not None and started_memory is not None:
+            if evidence is not None and started_memory is not None and memory_requested:
                 evidence.stage(_MEMORY_SEARCH_STAGE, (perf_counter() - started_memory) * 1000)
                 evidence.search(
                     "atomic-memory",
@@ -1857,7 +1861,7 @@ class ScopedContextApplication:
                 )
 
             experience_outcome = await self._recall_experience(
-                scope_id, request.query, experience_limit, admission, evidence
+                scope_id, request.query, experience_limit, admission, evidence, experience_requested
             )
         return _ScopeRecallOutcome(
             memory=PreparedMemoryCandidates(
@@ -1885,6 +1889,7 @@ class ScopedContextApplication:
         limit: int,
         admission: AdmissionFloor | None,
         evidence: ReceiptEvidence | None,
+        requested: bool,
     ) -> ExperienceSearchOutcome:
         reader = self._runtime._experience_recall
         started = perf_counter() if evidence is not None else None
@@ -1904,13 +1909,13 @@ class ScopedContextApplication:
                     else:
                         outcome = await reader(scope_id, query, limit, admission=admission)
                 except Exception:
-                    if evidence is not None and started is not None:
+                    if evidence is not None and started is not None and requested:
                         evidence.stage("experience.search", (perf_counter() - started) * 1000)
                         evidence.search("experience", None, "failed")
                     raise
             if span is not None:
                 span.set_attributes({"powercontext.experience.search.result_count": len(outcome.hits)})
-        if evidence is not None and started is not None:
+        if evidence is not None and started is not None and requested:
             evidence.stage("experience.search", (perf_counter() - started) * 1000)
             evidence.search(
                 "experience",
