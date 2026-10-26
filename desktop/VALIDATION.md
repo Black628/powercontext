@@ -22,13 +22,35 @@ cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml
 
 ## Compatibility scope
 
-[compatibility.json](src-tauri/src/connections/compatibility.json) preserves the recorded Server sources, normalized OpenAPI contract digests and qualification-wheel digests for the historical profiles below. The current contract is qualified by `sqlite-atomic-1da99747-v1` below; ordinary builds require explicitly selecting it and checking the connection before business operations become available. The `sqlite-atomic-d9a78567-v1`, `sqlite-atomic-caf2a35a-v1`, `sqlite-atomic-683e2db0-v1` and `sqlite-atomic-cab054db-v1` records qualify their corresponding Server source deployments and do not match this bundled contract. Historical records are disabled in the selector, and saved unavailable selections remain visible until explicitly replaced. CI builds have their own artifact identities and do not change product qualification.
+[compatibility.json](src-tauri/src/connections/compatibility.json) preserves the recorded Server sources, normalized OpenAPI contract digests and qualification-wheel digests for the historical profiles below. The current contract is qualified by `sqlite-atomic-8252ebb5-v1` below; ordinary builds require explicitly selecting it and checking the connection before business operations become available. The `sqlite-atomic-1da99747-v1`, `sqlite-atomic-d9a78567-v1`, `sqlite-atomic-caf2a35a-v1`, `sqlite-atomic-683e2db0-v1` and `sqlite-atomic-cab054db-v1` records qualify their corresponding Server source deployments and do not match this bundled contract. Historical records are disabled in the selector, and saved unavailable selections remain visible until explicitly replaced. CI builds have their own artifact identities and do not change product qualification.
 
 The real Server harness covers SQLite with anonymous loopback, static Bearer, HTTPS with explicit CA/base path, and injected-provider/enforced access. It exercises save/search/exact reads, identity changes, binding revocation, ambiguous writes without replay and Scope pagination. Installed UI checks cover repeated launches preserving the existing editor, late committed-save responses preserving a new Scope draft, explicit connection/Scope selection, clipboard copies, connection isolation, draft cancellation, byte limits and independent Server survival after Desktop exit.
 
 Selecting a compatibility profile does not attest the remote binary identity. Existing `sqlite-1.1.1-v1` / `sqlite-63f918b7-v1` / `sqlite-ab43e3a7-v1` / `sqlite-f1089f4e-v1` / `sqlite-6e237568-v1` / `sqlite-legacy-58f7f4f6-v1` selections require explicitly choosing an available matching profile and rechecking the connection. Desktop reads memories only through Atomic Memory references, so Servers that answer only with Memory entry citations are not qualified. CLI diagnostics separately verify the registered executable path and digest, then validate the diagnostic response schema. The observed version is optional report information; a registration does not require a version.
 
 ### Current Server protocol qualification
+
+#### Server 8252ebb5 protocol qualification
+
+`sqlite-atomic-8252ebb5-v1` qualifies the Server source at
+`8252ebb5812b5d5972afb2a78efc14fa9b79dd7e` for the bundled OpenAPI digest
+`da214872028f7f181cea894159f3bd99b621d4e9a8158b9aa184159dbfbfc15e`. The qualification wheel is
+`powercontext-1.3.1.dev268+g8252ebb58.d20261026-py3-none-any.whl`, SHA-256
+`4e145007c14665f3d516e803a88c29f06db372a4e3f7011adf3d342626051e40`.
+
+On 2026-10-26, macOS 15.7.4 ARM64 with Python 3.11.15 and Rust 1.95.0 ran the
+native `ConnectionManager` and `server_probe` against the extracted wheel and
+independent SQLite Server processes. All four modes passed: anonymous loopback,
+static Bearer, HTTPS with explicit CA/base path, and injected-provider/enforced
+access. The provider mode also passed identity change invalidation, same-identity
+revocation of exact reads, and Scope pagination. Every mode confirmed that the
+Server remains alive after Desktop exits and that a committed write with a lost
+response remains unknown without replay.
+
+This is protocol qualification for the recorded source and wheel, not binary
+attestation of an arbitrary remote Server. It does not qualify the installed UI,
+Windows, signing, notarization, IME, or screen-reader behavior. The ignored
+evidence is under `desktop/.artifacts/real-server.json`.
 
 #### Server 1da99747 protocol qualification
 
