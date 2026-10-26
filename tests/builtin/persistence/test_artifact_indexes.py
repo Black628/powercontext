@@ -1,7 +1,16 @@
 # Copyright (c) 2026 OceanBase.
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at https://www.apache.org/licenses/LICENSE-2.0
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """Actual SQLite search, exact evidence and atomic projection publication."""
 
@@ -55,9 +64,7 @@ def declaration(*, version="1", vector_field="vector", profile=PROFILE):
 
 @asynccontextmanager
 async def store(config=None, model=None):
-    async with SQLiteProfile.open(
-        config or SQLiteConfig(), tables=BUILTIN_TABLES, load_vector_extension=True
-    ) as storage:
+    async with SQLiteProfile.open(config or SQLiteConfig(), tables=BUILTIN_TABLES) as storage:
         yield (
             storage.database,
             ArtifactIndexBuilder(storage.database, model),
@@ -103,6 +110,37 @@ def service(db, family, model=None):
     result = ArtifactSearchService(known_families=(family,))
     result.register(CustomArtifactSearcher(db, family, model))
     return result
+
+
+def test_missing_vector_extension_keeps_text_search_and_content_writes_available(monkeypatch, tmp_path):
+    import sqlite_vec
+
+    async def run():
+        config = SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'vectors.db'}")
+        async with store(config) as (db, builder, publisher):
+            await register(db, "reports", declaration())
+            await write(db, publisher, "scope", "reports", "a", body("数据库", [1, 0]))
+            await builder.refresh("scope", "reports")
+            assert await builder.build("scope", "reports")
+
+        monkeypatch.setattr(sqlite_vec, "loadable_path", lambda: str(tmp_path / "missing-sqlite-vec"))
+        async with store(config) as (db, _, publisher):
+            search = service(db, "reports")
+            with pytest.raises(ArtifactSearchUnavailable):
+                await search.search(
+                    "scope",
+                    "reports",
+                    {
+                        "mode": "vector",
+                        "query_vector": {"profile": PROFILE.model_dump(mode="json"), "vector": [1, 0]},
+                    },
+                )
+            result = await search.search("scope", "reports", {"mode": "text", "query": "数据库"})
+            assert [artifact.artifact_id for artifact in result.artifacts] == ["a"]
+            revised = await write(db, publisher, "scope", "reports", "a", body("数据库 restored", [0, 1]))
+            assert revised.revision == 2
+
+    asyncio.run(run())
 
 
 def test_exact_vectors_collapse_fragments_before_limit_and_preserve_scope_history():

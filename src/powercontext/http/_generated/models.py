@@ -3890,7 +3890,7 @@ class FlushProfileResponse(BaseModel):
 
 class ArtifactCollectionItem(BaseModel):
     scope_id: Annotated[StrictStr, Field(max_length=256, min_length=1, pattern=".*\\S.*")]
-    family: ArtifactReadFamily
+    family: Annotated[StrictStr, Field(max_length=128, min_length=1, pattern="^[a-z][a-z0-9-]*$")]
     artifact_id: Annotated[StrictStr, Field(max_length=128, min_length=1, pattern="^[\\x21-\\x7E]+$")]
     schema_version: Annotated[
         StrictStr | None, Field(description="Persisted schema version for a custom Artifact family.")
@@ -3937,7 +3937,7 @@ class ArtifactRevisionPage(BaseModel):
 
 class ArtifactRevision(BaseModel):
     scope_id: Annotated[StrictStr, Field(max_length=256, min_length=1, pattern=".*\\S.*")]
-    family: ArtifactReadFamily
+    family: Annotated[StrictStr, Field(max_length=128, min_length=1, pattern="^[a-z][a-z0-9-]*$")]
     artifact_id: Annotated[StrictStr, Field(max_length=128, min_length=1, pattern="^[\\x21-\\x7E]+$")]
     schema_version: Annotated[
         StrictStr | None, Field(description="Persisted schema version for a custom Artifact family.")

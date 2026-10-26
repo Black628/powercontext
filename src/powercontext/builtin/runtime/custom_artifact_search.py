@@ -1,13 +1,23 @@
 # Copyright (c) 2026 OceanBase.
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at https://www.apache.org/licenses/LICENSE-2.0
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """Declaration-driven text/vector/hybrid search returning complete exact Artifacts."""
 
 from __future__ import annotations
 
 import math
+import sqlite3
 import struct
 from contextlib import AsyncExitStack
 from dataclasses import dataclass
@@ -51,6 +61,7 @@ from powercontext.builtin.persistence.artifact_indexes import (
     vector_bytes,
 )
 from powercontext.builtin.persistence.custom_artifacts import custom_artifact_repository
+from powercontext.builtin.persistence.sqlite.profile import ensure_sqlite_vector_extension
 from powercontext.builtin.persistence.tables import ARTIFACT_HEADS_TABLE, ARTIFACT_PROCESSING_BINDING_STATES_TABLE
 from powercontext.server.authz import AccessAction, ResourceRef
 
@@ -422,6 +433,11 @@ class CustomArtifactSearcher:
         return [(row.artifact_id, int(row.revision), float(row.score)) for row in result]
 
     async def _vector(self, connection, scope, definition, build_id, vector, profile):
+        if connection.dialect.name == "sqlite":
+            try:
+                await ensure_sqlite_vector_extension(connection)
+            except (AttributeError, sqlite3.Error) as error:
+                raise ArtifactSearchUnavailable(self.family, "SQLite vector extension is unavailable") from error
         table = await projection_table(connection, definition)
         function = "vec_distance_l2" if connection.dialect.name == "sqlite" else "l2_distance"
         # Table identity comes only from a validated server-owned space, never the request.

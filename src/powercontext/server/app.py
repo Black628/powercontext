@@ -3110,7 +3110,7 @@ def _transport_actor(actor: ArtifactRevisionActor | None) -> TransportAccessPrin
 def _artifact_revision_response(value: RuntimeArtifactRecord) -> ArtifactRevision:
     return ArtifactRevision(
         scope_id=value.scope_id,
-        family=ArtifactReadFamily(value.family),
+        family=value.family,
         schema_version=value.schema_version,
         artifact_id=value.artifact_id,
         revision=value.revision,
@@ -3139,7 +3139,7 @@ def _artifact_created_response(value: RuntimeArtifactCreated) -> ArtifactCreated
 def _artifact_collection_item_response(value: RuntimeArtifactCollectionItem) -> ArtifactCollectionItem:
     return ArtifactCollectionItem(
         scope_id=value.scope_id,
-        family=ArtifactReadFamily(value.family),
+        family=value.family,
         schema_version=value.schema_version,
         artifact_id=value.artifact_id,
         revision=value.revision,

@@ -1026,9 +1026,28 @@ def test_standard_artifact_reads_share_topic_memory_family_and_display_metadata(
         "published_at": "2026-09-10T00:00:00Z",
         "source_count": 2,
     })
-    assert item.family.root == "topic-memory"
+    assert item.family == "topic-memory"
     assert item.title == "A topic"
     assert item.source_count == 2
+
+
+@pytest.mark.parametrize("model", [http_models.ArtifactCollectionItem, ArtifactRevision])
+@pytest.mark.parametrize("family", ["atomic-memory", "incident-report"])
+def test_artifact_read_family_remains_a_string_with_contract_validation(model, family):
+    value = {
+        "scope_id": "scope",
+        "family": family,
+        "artifact_id": "artifact",
+        "revision": 1,
+        "content": {},
+        "sources": [],
+        "artifacts": [],
+        "content_digest": f"sha256:{'0' * 64}",
+    }
+    assert model.model_validate(value).family == family
+    for invalid in ("", "INVALID", "x" * 129, 123):
+        with pytest.raises(ValidationError):
+            model.model_validate({**value, "family": invalid})
 
 
 def test_base_access_uses_a_dedicated_source_type_reference() -> None:

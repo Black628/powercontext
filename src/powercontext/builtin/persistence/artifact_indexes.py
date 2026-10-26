@@ -1,7 +1,16 @@
 # Copyright (c) 2026 OceanBase.
+#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at https://www.apache.org/licenses/LICENSE-2.0
+# You may obtain a copy of the License at
+#
+# http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """Transactional custom Artifact projections, build coordination and rebuilds."""
 
@@ -24,6 +33,7 @@ from powercontext.artifacts.search import ArtifactSearchFamilyNotFound, Artifact
 from powercontext.builtin.artifacts.memory.canonical import canonical_embedding, canonical_json
 from powercontext.builtin.artifacts.memory.models import EmbeddingProfile
 from powercontext.builtin.artifacts.search import TEXT_ANALYZER_VERSION, analyze_text
+from powercontext.builtin.persistence.sqlite.profile import ensure_sqlite_vector_extension
 from powercontext.builtin.persistence.tables import (
     ARTIFACT_FAMILY_SCHEMAS_TABLE as SCHEMAS,
 )
@@ -903,6 +913,7 @@ class ArtifactIndexBuilder:
             if isinstance(index, VectorIndex):
                 probe = vector_bytes([1.0] * index.profile.dimension, index.profile)
                 if connection.dialect.name == "sqlite":
+                    await ensure_sqlite_vector_extension(connection)
                     await connection.execute(text("SELECT vec_distance_l2(:vector, :vector)"), {"vector": probe})
                 else:
                     from sqlalchemy import bindparam

@@ -1167,7 +1167,7 @@ async def open_builtin_contexts(
         async with SQLiteProfile.open(
             database,
             tables=BUILTIN_TABLES + topic_index.tables + atomic_index.tables,
-            load_vector_extension=True,
+            load_vector_extension=embedding_model is not None,
         ) as profile:
             async with profile.database.transaction() as connection:
                 # This block is SQLite-only. Reserve SQLite's single-writer slot

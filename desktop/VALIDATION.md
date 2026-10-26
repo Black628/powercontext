@@ -475,3 +475,11 @@ and checks digest rejection and allowlisted projection; it does not qualify a re
 Use a disposable Server and Scope for installed save/search/read/copy checks. Unit tests do not prove
 those installed workflows. Validate actual Chinese IME, accessibility, Gatekeeper, signing and
 notarization independently before distributing outside the internal preview.
+
+## Server d6820d88 protocol qualification
+
+`sqlite-artifact-d6820d88-v1` identifies Server sources at `d6820d884ccd240712df477e459622f60fd6f5f5`, contract digest `f571a95d193f0dae91694ffcd6b37c93603a5ae731fddefbcdbfa9a5914762ae`, and wheel digest `5bcedfde3efa4ae028318a9b8848dec44b5604ac6f636f32bacb637ca5729f52`. The wheel `powercontext-0.1.dev0+gd6820d88-py3-none-any.whl` was built from a clean Git archive of that commit with an explicit archive-build version; all 563 runtime files match the archived sources byte for byte.
+
+On 2026-10-26, the native `ConnectionManager` and HTTP adapter passed all four built-wheel SQLite fixture modes: anonymous loopback, Bearer, HTTPS with an explicit CA/base path, and injected-provider/enforced access. The unchanged `server_probe.rs` assertions cover writes, search, exact historical reads, lost-response writes without replay, identity changes, revocation, and Scope pagination. The qualification records the same ten Desktop operations as the preceding profile; it does not qualify the new plugin administration operations.
+
+Validation used Linux, Python 3.12.12 and Rust 1.95.0. The unchanged connection, credential and transport modules and probe were built in an isolated native crate without Tauri/UI dependencies. On the loaded host, importing the Server took about 60 seconds, so the local fixture preparation allowance was 180 seconds instead of 20; protocol assertions and product timeouts were unchanged. This establishes native SQLite protocol compatibility, not full Tauri, installed-package, Windows/macOS service, vault or UI acceptance.
