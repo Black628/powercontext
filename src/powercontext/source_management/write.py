@@ -17,8 +17,8 @@ from powercontext.builtin.persistence.errors import StoredPayloadConflictError
 from powercontext.builtin.persistence.source_definitions import SourceDefinitionManifestRepository
 from powercontext.builtin.persistence.tables import SOURCE_WRITE_PLUGINS_TABLE
 from powercontext.builtin.runtime.models import SubmitSourceObservation
-from powercontext.builtin.runtime.relational import _validate_source_definition_manifest
 from powercontext.builtin.sources import BUILTIN_SOURCE_REGISTRY
+from powercontext.builtin.sources.observation_validation import validate_source_definition_manifest
 from powercontext.limits import MAX_SOURCE_OBSERVATION_BYTES
 from powercontext.source_management.loading import load_local_module
 from powercontext.source_management.models import BUILTIN_CAPABILITY, Capability, ManagementError, Model
@@ -93,7 +93,7 @@ def _validate_definition(definition) -> None:
             raise ManagementError(
                 "invalid-plugin", "Definition and Projection methods must accept one value"
             ) from error
-    _validate_source_definition_manifest(manifest_for_definition(definition), BUILTIN_SOURCE_REGISTRY)
+    validate_source_definition_manifest(manifest_for_definition(definition))
 
 
 class SourceWritePlugins:

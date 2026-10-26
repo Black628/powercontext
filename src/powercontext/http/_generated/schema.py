@@ -7,7 +7,7 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
     "info": {
         "title": "PowerContext API",
         "description": "Remote PowerContext transport. Runtime behavior is reported by /v1/capabilities.",
-        "version": "1.4.0",
+        "version": "1.4.1",
     },
     "paths": {
         "/v1/atomic-memory/list": {
@@ -9040,6 +9040,84 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                     "status": {"$ref": "#/components/schemas/PreparedContextStatus"},
                     "content": {"type": "string", "nullable": True},
                     "content_bytes": {"type": "integer", "minimum": 0.0},
+                    "reason": {
+                        "allOf": [{"$ref": "#/components/schemas/PreparedContextReason"}],
+                        "description": "Why this "
+                        "preparation "
+                        "lost a "
+                        "retrieval "
+                        "channel "
+                        "it would "
+                        "otherwise "
+                        "have "
+                        "used. "
+                        "Absent "
+                        "unless "
+                        "the "
+                        "request "
+                        "asked "
+                        "with "
+                        "`explain` "
+                        "and a "
+                        "channel "
+                        "was "
+                        "lost, so "
+                        "a "
+                        "response "
+                        "a Host "
+                        "injects "
+                        "keeps "
+                        "its four "
+                        "fields. "
+                        "The "
+                        "values "
+                        "are the "
+                        "two "
+                        "inference "
+                        "failures "
+                        "among "
+                        "RFC "
+                        "1435's "
+                        "four "
+                        "`SearchGroup.fallback_reason` "
+                        "spellings, "
+                        "so a "
+                        "later "
+                        "Receipt "
+                        "reuses "
+                        "them "
+                        "instead "
+                        "of "
+                        "restating "
+                        "the "
+                        "cause. "
+                        "`none` "
+                        "travels "
+                        "as "
+                        "absence, "
+                        "and "
+                        "`reused_fts_fallback` "
+                        "is not a "
+                        "cause "
+                        "here: a "
+                        "later "
+                        "round "
+                        "reusing "
+                        "a failed "
+                        "round's "
+                        "keyword-only "
+                        "outcome "
+                        "is still "
+                        "explained "
+                        "by that "
+                        "round's "
+                        "`inference_*` "
+                        "value, "
+                        "which "
+                        "outranks "
+                        "it.",
+                        "nullable": True,
+                    },
                 },
                 "additionalProperties": False,
                 "type": "object",
@@ -10696,6 +10774,37 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                         "preparation.",
                         "default": False,
                     },
+                    "explain": {
+                        "type": "boolean",
+                        "description": "Opt "
+                        "into "
+                        "reporting "
+                        "which "
+                        "retrieval "
+                        "channel "
+                        "this "
+                        "preparation "
+                        "lost, "
+                        "as "
+                        "`reason` "
+                        "on "
+                        "the "
+                        "response. "
+                        "Off "
+                        "by "
+                        "default, "
+                        "because "
+                        "a "
+                        "response "
+                        "a "
+                        "Host "
+                        "injects "
+                        "keeps "
+                        "its "
+                        "four "
+                        "fields.",
+                        "default": False,
+                    },
                     "assembly": {"$ref": "#/components/schemas/ContextAssembly"},
                     "bootstrap_receipt_id": {
                         "type": "string",
@@ -11744,7 +11853,16 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                         "through "
                         "their "
                         "dedicated "
-                        "workflow."
+                        "workflow. "
+                        "String "
+                        "values "
+                        "that "
+                        "are "
+                        "empty "
+                        "or "
+                        "whitespace-only "
+                        "are "
+                        "rejected."
                     },
                 },
                 "additionalProperties": False,
@@ -12417,6 +12535,7 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
             "BootstrapContextStatus": {"type": "string", "enum": ["ready", "empty", "skipped"]},
             "BootstrapContextItemKind": {"type": "string", "enum": ["atomic-memory", "handoff"]},
             "BootstrapReceiptState": {"type": "string", "enum": ["pending", "injected", "skipped", "failed"]},
+            "PreparedContextReason": {"type": "string", "enum": ["inference_timeout", "inference_unavailable"]},
             "BootstrapSkipReason": {
                 "type": "string",
                 "enum": ["disabled", "no_eligible_context", "already_delivered", "preparation_failed"],
