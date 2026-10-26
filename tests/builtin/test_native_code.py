@@ -759,7 +759,7 @@ def test_http_client_mcp_and_prepared_code_share_freshness(repository, tmp_path)
         settings=ServerSettings(
             database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'http.db'}"),
             code=code,
-        )
+        ),
     )
 
     def http_client(headers=None, timeout=None, auth=None, **_):
@@ -774,6 +774,9 @@ def test_http_client_mcp_and_prepared_code_share_freshness(repository, tmp_path)
 
     async def exercise():
         nonlocal app
+        # Initialize Server-owned storage before seeding it through the SDK.
+        async with app.router.lifespan_context(app):
+            pass
         database = SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'http.db'}")
         async with open_builtin_runtime(BuiltinConfig(database=database)) as runtime:
             assert runtime.scopes is not None

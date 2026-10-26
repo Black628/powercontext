@@ -27,6 +27,7 @@ from pydantic import SecretStr, ValidationError
 from powercontext.builtin.authz import AccessAction
 from powercontext.builtin.authz.errors import AccessDeniedError, AccessUnavailableError
 from powercontext.builtin.persistence.oceanbase import OceanBaseConfig
+from powercontext.builtin.persistence.sqlite import SQLiteConfig
 from powercontext.builtin.runtime.config import RuntimeConfig
 from powercontext.server.background_metrics import create_background_metrics_app, serve_background_metrics
 from powercontext.server.metrics import ServerMetrics
@@ -166,6 +167,7 @@ def test_background_runner_closes_runtime_and_removes_signal_handlers(monkeypatc
 
     async def scenario():
         _, settings = _app(enabled=outcome != "disabled")
+        settings = settings.model_copy(update={"database": SQLiteConfig()})
         events = []
         signals = []
         loop = asyncio.get_running_loop()
