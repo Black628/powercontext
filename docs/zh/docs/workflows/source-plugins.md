@@ -59,7 +59,7 @@ POWERCONTEXT_SERVER_SOURCE_PLUGINS_DIR=/srv/powercontext/source-plugins
 POWERCONTEXT_SERVER_ACCESS='{"mode":"enforced"}'
 ```
 
-首次配置后重启 Server。自动部署创建独立管理和执行凭据，不修改用户身份文件。Server 启动扫描直接子目录的 `powercontext.yml`；之后新增实例显式 load，不持续扫描。此自动扫描用于 collect；write 使用前述 `--kind write` 显式加载。Linux 上管理服务和 Runtime 默认使用后台进程；`source_management.process_mode="local-service"` 显式选择 systemd 用户服务。
+首次配置后重启 Server。自动部署创建独立管理和执行凭据，不修改用户身份文件。Server 启动扫描直接子目录的 `powercontext.yml`；之后新增实例显式 load，不持续扫描。此自动扫描用于 collect；write 使用前述 `--kind write` 显式加载。本地 collect 部署要求 Linux：`source_management.process_mode="background"`（默认）使用后台进程；`"local-service"` 还要求可用的 systemd 用户服务管理器（`systemctl --user`）。两种模式均不支持在 macOS 或 Windows 上本地部署。此限制针对 collect 进程管理，不针对 Server 内同步执行的 write 插件。
 
 实例目录就近放置 `__init__.py`、`definition.py`、资料文件和 `powercontext.yml`，例如：
 
@@ -156,6 +156,7 @@ pc_source_status({"scope_id":"SCOPE_ID","target_id":"TARGET_ID","view":"control"
 
 | 现象 | 检查和处理 |
 | --- | --- |
+| 启动日志出现 `background-unsupported` 或 `service-unavailable` | 本地 collect 部署要求 Linux；`local-service` 还需要可用的 `systemctl --user`。检查执行平台和进程模式。 |
 | 管理服务断线 | 已同步的 collect 可继续；新管理调用可能失败。内置及已加载的 write 不依赖管理服务。 |
 | Runtime 重启后管理服务不可达 | 等待重新同步目标，不从文件初始 targets 回退采集。 |
 | 目标长期没有新 Source | 检查插件采集逻辑是否仍运行、采集节奏、外部凭据和 Scope 权限；进程在线不保证采集成功。 |

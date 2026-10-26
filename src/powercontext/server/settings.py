@@ -151,7 +151,10 @@ class BearerAuthConfig(BaseModel):
 class SourceManagementConfig(BaseModel):
     """One trusted manager and optional local background deployment."""
 
-    process_mode: Literal["background", "local-service"] = "background"
+    process_mode: Literal["background", "local-service"] = Field(
+        default="background",
+        description="Local collect deployment requires Linux; local-service also requires systemd --user.",
+    )
     manager_subject: str | None = None
     manager_id: str = "sources"
     autostart: bool = False

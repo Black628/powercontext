@@ -57,10 +57,11 @@ def _alive(state):
 
 def process_action(role, config, action):
     """Start or stop only a confirmed local process; repeated starts preserve its state."""
-    import fcntl
-
     if sys.platform != "linux":
         raise ManagementError("background-unsupported", "Source background processes currently require Linux")
+
+    import fcntl
+
     if action == "start":
         secret(config.server.credential_file)
         if isinstance(config, RuntimeConfig):

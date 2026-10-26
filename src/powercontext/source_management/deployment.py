@@ -343,15 +343,35 @@ class DeploymentCoordinator:
         if self.settings.source_management.autostart:
             try:
                 await self.manager()
-            except Exception:
-                logger.error("Source manager startup failed; inspect local service configuration")  # noqa: TRY400 - no secret-bearing traceback
+            except Exception as error:
+                log_safely(
+                    logger,
+                    logging.ERROR,
+                    "Source manager startup failed; inspect local service configuration",
+                    extra={
+                        "error_code": error.code
+                        if isinstance(error, ManagementError)
+                        and error.code in {"background-unsupported", "service-unavailable"}
+                        else "deployment-failed",
+                    },
+                )
         directory = self.settings.source_plugins_dir
         if directory is not None:
             for path in sorted(directory.expanduser().glob("*/powercontext.yml")):
                 try:
                     await self.load(path)
-                except Exception:
-                    log_safely(logger, logging.ERROR, "Source instance preparation failed; inspect local configuration")
+                except Exception as error:
+                    log_safely(
+                        logger,
+                        logging.ERROR,
+                        "Source instance preparation failed; inspect local configuration",
+                        extra={
+                            "error_code": error.code
+                            if isinstance(error, ManagementError)
+                            and error.code in {"background-unsupported", "service-unavailable"}
+                            else "deployment-failed",
+                        },
+                    )
 
 
 async def inspect_manifests(config):

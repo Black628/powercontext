@@ -59,7 +59,7 @@ POWERCONTEXT_SERVER_SOURCE_PLUGINS_DIR=/srv/powercontext/source-plugins
 POWERCONTEXT_SERVER_ACCESS='{"mode":"enforced"}'
 ```
 
-Restart Server after initial configuration. Automatic deployment creates separate management and execution credentials without editing user identity files. Startup scans direct child directories for `powercontext.yml`; subsequent additions require an explicit load. This scan deploys collect instances; load write plugins explicitly with `--kind write` as above. On Linux, the manager and Runtimes use background processes by default. Set `source_management.process_mode="local-service"` explicitly for systemd user services.
+Restart Server after initial configuration. Automatic deployment creates separate management and execution credentials without editing user identity files. Startup scans direct child directories for `powercontext.yml`; subsequent additions require an explicit load. This scan deploys collect instances; load write plugins explicitly with `--kind write` as above. Local collect deployment requires Linux: `source_management.process_mode="background"` (the default) uses background processes; `"local-service"` additionally requires an available systemd user service manager (`systemctl --user`). Neither mode supports local deployment on macOS or Windows. This restriction concerns collect process management, not Server-local synchronous write plugins.
 
 An instance directory keeps `__init__.py`, `definition.py`, data files, and `powercontext.yml` together:
 
@@ -158,6 +158,7 @@ The current implementation has no complete unload command that deletes an instan
 
 | Symptom | Check or action |
 | --- | --- |
+| Startup logs report `background-unsupported` or `service-unavailable` | Local collect deployment requires Linux; `local-service` also requires a working `systemctl --user`. Check the execution platform and selected process mode. |
 | Manager disconnected | Collect can continue with synchronized targets; new management calls may fail. Built-in and loaded write capabilities do not depend on the manager. |
 | Runtime restarts while the manager is unreachable | Wait for target synchronization; do not fall back to initial targets in the file. |
 | A target produces no new Sources | Check that collection logic is still running, its schedule, external credentials, and Scope permissions. A live process does not prove successful collection. |
