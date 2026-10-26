@@ -121,6 +121,7 @@ class OceanBaseProfile:
         config: OceanBaseConfig,
         *,
         tables: tuple[Table, ...],
+        _archive_recovery: bool = False,
     ) -> AsyncIterator[OceanBaseProfile]:
         """Create, initialize and exclusively own an official OceanBase engine."""
 
@@ -137,7 +138,9 @@ class OceanBaseProfile:
             pool_pre_ping=config.pool_pre_ping,
         )
         database = AsyncDatabase.own(engine)
-        async with _initialized_profile(cls(database=database, tables=tables)) as profile:
+        async with _initialized_profile(
+            cls(database=database, tables=tables), _archive_recovery=_archive_recovery
+        ) as profile:
             yield profile
 
     @classmethod
@@ -157,11 +160,13 @@ class OceanBaseProfile:
 
 
 @asynccontextmanager
-async def _initialized_profile(profile: OceanBaseProfile) -> AsyncIterator[OceanBaseProfile]:
+async def _initialized_profile(
+    profile: OceanBaseProfile, *, _archive_recovery: bool = False
+) -> AsyncIterator[OceanBaseProfile]:
     try:
         async with profile.database.transaction() as connection:
             await _require_mysql_tenant(connection)
-        await assert_dream_schema_ready(profile.database.engine)
+        await assert_dream_schema_ready(profile.database.engine, _archive_recovery=_archive_recovery)
         if profile.tables:
             await prepare_topic_memory_recovery_schema(
                 profile.database.engine, initialize=any(table.name == BUDGET for table in profile.tables)
@@ -180,6 +185,12 @@ async def _require_mysql_tenant(connection: AsyncConnection) -> None:
     result = await connection.exec_driver_sql("SHOW VARIABLES LIKE 'ob_compatibility_mode'")
     row = result.first()
     mode = None if row is None or len(row) < 2 else str(row[1]).upper()
+    if row is None:
+        # Standalone SeekDB 1.4 is MySQL-only and no longer exposes the
+        # multi-tenant compatibility variable. Keep unknown servers rejected.
+        version_row = (await connection.exec_driver_sql("SELECT VERSION()")).first()
+        if version_row and "-OceanBase seekdb-" in str(version_row[0]):
+            return
     if mode != "MYSQL":
         raise UnsupportedOceanBaseTenantError(mode)
 
