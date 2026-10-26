@@ -29,3 +29,54 @@ content under the same identity as if it were a new observation.
 - Application or evaluation events: use the application's adapter; [Bub capture](../integrations/evaluation.md) is opt-in.
 
 Source writes and reads are subject to the selected [Scope and access policy](scopes-and-access.md).
+
+## Capture CSV rows from Python
+
+Use `powercontext.sources.csv_rows` to capture each CSV record independently. Parsing is offline and uses no model or
+network service. Supply the complete UTF-8 bytes, a stable document ID, and the exact primary-key column name:
+
+```python
+from powercontext.builtin.runtime import SubmitSourceObservation
+from powercontext.sources import (
+    SourceDefinitionRegistry,
+    manifest_for_definition,
+    project_source_for_transport,
+)
+from powercontext.sources.csv_rows import (
+    CSV_ROW_SOURCE_DEFINITION,
+    CSVDocumentInput,
+    parse_csv_document,
+)
+
+
+async def capture_csv(runtime, scope_id: str, csv_bytes: bytes) -> None:
+    rows = parse_csv_document(
+        CSVDocumentInput(document_id="airports", primary_key="id", content=csv_bytes)
+    )
+    registry = SourceDefinitionRegistry((CSV_ROW_SOURCE_DEFINITION,))
+    await runtime.ingestion.register(manifest_for_definition(CSV_ROW_SOURCE_DEFINITION))
+    for row in rows:
+        source = await registry.resolve(row)
+        observation = project_source_for_transport(registry, source)
+        await runtime.ingestion.submit(SubmitSourceObservation(scope_id=scope_id, observation=observation))
+```
+
+`parse_csv_document` validates the entire document before returning a tuple. It accepts an initial UTF-8 BOM, quoted
+commas, escaped quotes, and multiline fields. Empty physical records after the header are ignored; a header-only
+document returns `()`. Invalid encoding, quoting, headers, row widths, missing or duplicate keys, and oversized Source
+identities raise `ValueError`. Parsing failure returns no partial rows; the later Runtime submissions are separate writes.
+
+Header names and field values keep their original strings and order. Column names must be unique and nonblank;
+`primary_key` matches a column exactly, including surrounding spaces. The document ID must be nonempty with no
+surrounding whitespace. Key values must be nonblank; surrounding key whitespace remains significant.
+
+Each captured Source has type `csv-row`, definition version `1`, and identity
+`csv:{encoded document_id}:{encoded primary_key_value}`. Components use `urllib.parse.quote(value, safe="")` and the
+complete identity is limited to 256 characters. Reordering records or changing non-key values keeps the logical row ID.
+The existing ingestion rules still govern reuse of an already captured identity; this adapter does not add an update API.
+
+The `powercontext.text-evidence` projection contains a compact JSON object in original column order. Its metadata has
+exactly `document_id`, `primary_key`, `primary_key_value`, `columns`, and `row`; all CSV values, including empty fields
+and numeric strings, remain strings. Registered manifests and submitted observations preserve this evidence across
+Runtime restarts. A configured Memory pipeline can consume the projection, and a search hit's exact `MemoryCitation`
+can retrieve the corresponding Memory entry and Source reference. CSV parsing and capture do not configure extraction.
