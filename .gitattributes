@@ -4,3 +4,6 @@ e2e/bub/tasks/*.yaml text eol=lf
 integrations/dsh/plugins/powercontext/src/operations.generated.ts text eol=lf
 integrations/dsh/plugins/powercontext/lib/*.js text eol=lf
 integrations/dsh/plugins/powercontext/lib/*.d.ts text eol=lf
+
+# Public Pi fixtures are verified byte-for-byte by their published SHA-256.
+competition/challenges/source-02-pi-history/workload/public/*.jsonl text eol=lf
