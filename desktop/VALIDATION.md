@@ -22,13 +22,59 @@ cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml
 
 ## Compatibility scope
 
-[compatibility.json](src-tauri/src/connections/compatibility.json) preserves the recorded Server sources, normalized OpenAPI contract digests and qualification-wheel digests for the historical profiles below. The current contract is qualified by `sqlite-atomic-777bfdb7-v1` below; ordinary builds require explicitly selecting it and checking the connection before business operations become available. The `sqlite-atomic-1da99747-v1`, `sqlite-atomic-d9a78567-v1`, `sqlite-atomic-caf2a35a-v1`, `sqlite-atomic-683e2db0-v1` and `sqlite-atomic-cab054db-v1` records qualify their corresponding Server source deployments and do not match this bundled contract. Historical records are disabled in the selector, and saved unavailable selections remain visible until explicitly replaced. CI builds have their own artifact identities and do not change product qualification.
+[compatibility.json](src-tauri/src/connections/compatibility.json) preserves the recorded Server sources, normalized OpenAPI contract digests and qualification-wheel digests for the historical profiles below. The current contract is qualified by `sqlite-atomic-cc5980f0-v1` below; ordinary builds require explicitly selecting it and checking the connection before business operations become available. Historical records qualify their corresponding Server source deployments and do not match this bundled contract. Historical records are disabled in the selector, and saved unavailable selections remain visible until explicitly replaced. CI builds have their own artifact identities and do not change product qualification.
 
 The real Server harness covers SQLite with anonymous loopback, static Bearer, HTTPS with explicit CA/base path, and injected-provider/enforced access. It exercises save/search/exact reads, identity changes, binding revocation, ambiguous writes without replay and Scope pagination. Installed UI checks cover repeated launches preserving the existing editor, late committed-save responses preserving a new Scope draft, explicit connection/Scope selection, clipboard copies, connection isolation, draft cancellation, byte limits and independent Server survival after Desktop exit.
 
 Selecting a compatibility profile does not attest the remote binary identity. Existing `sqlite-1.1.1-v1` / `sqlite-63f918b7-v1` / `sqlite-ab43e3a7-v1` / `sqlite-f1089f4e-v1` / `sqlite-6e237568-v1` / `sqlite-legacy-58f7f4f6-v1` selections require explicitly choosing an available matching profile and rechecking the connection. Desktop reads memories only through Atomic Memory references, so Servers that answer only with Memory entry citations are not qualified. CLI diagnostics separately verify the registered executable path and digest, then validate the diagnostic response schema. The observed version is optional report information; a registration does not require a version.
 
 ### Current Server protocol qualification
+
+#### Server cc5980f0 protocol qualification
+
+`sqlite-atomic-cc5980f0-v1` qualifies Server sources at
+`cc5980f01610f32b2f86b4d4068dd72a0408a500` for OpenAPI digest
+`fd8f5dcf8dfb1a02c186623c08c3c62217ecdbc21a80cd5d9c329f3497b85f7d`.
+The wheel `powercontext-1.4.1.dev211+gcc5980f0-py3-none-any.whl` has SHA-256
+`443f5ec8c73148045caadbba09cf6f08cc6e17329fcf9764378ebcc2cb03ba7c`.
+It was built from `git archive` of that commit with
+`SETUPTOOLS_SCM_PRETEND_VERSION=1.4.1.dev211+gcc5980f0 uv build --wheel`.
+All 614 packaged runtime files across `powercontext/` and `powercontext_service_bootstrap/`
+match the archived sources byte for byte. Their manifest digest (sorted `wheel/path sha256`
+lines with a final newline) is
+`ea0a886acb5092548822b43b2dcee7f3e414a5ffba7d6bdc0b193ac311e157c1`.
+The OpenAPI contract, project configuration and lock also match that commit.
+
+On 2026-10-27, macOS 26.6.2 ARM64, Python 3.13.12 and Rust 1.99.1 ran
+`desktop/tests/real_server.py` with the freshly built native `server_probe` against
+independent SQLite Server processes loaded from that wheel. Anonymous loopback,
+static Bearer, HTTPS with an explicit CA/base path, and injected-provider/enforced
+access all passed. The ten operations recorded in the profile cover liveness,
+readiness, access principal, capabilities, Scope listing/detail/default, Atomic Memory
+save/search and exact Artifact revision reads. The same native connection manager also
+passed Scope pagination, identity changes, same-identity revocation, committed writes
+with lost responses without replay, and independent Server survival after client exit.
+
+The client Rust sources, Cargo manifest/lock and qualification harnesses match the
+recorded commit. The candidate fixture profile supplied the exact wheel/contract identity
+to the probe. Evidence is
+retained locally in ignored `desktop/.artifacts/real-server.json`,
+`desktop/.artifacts/qualification-wheel-identity.json`,
+`desktop/.artifacts/qualification-cc5980f0/` and `desktop/.artifacts/server-wheel/`.
+
+`cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml` passed all 62 tests,
+including `bundled_qualification_allows_explicit_scope_browsing`, with this product record.
+
+This qualifies the listed SQLite protocol operations on that host. Windows execution,
+installed UI, native credential persistence, signing and packaging require their own
+acceptance checks. Historical profiles retain their original identities and evidence.
+
+2026-10-27，使用上述提交的归档源码构建独立 wheel，并逐文件核对 614 个运行时文件及
+OpenAPI、项目配置和锁文件。原生探针通过匿名回环、Bearer、显式 CA／路径前缀 HTTPS
+及强制访问控制四种真实 SQLite 协议验收，覆盖所列十项操作、Scope 分页、身份变更、
+同身份撤权、响应丢失后不重放已提交写入及客户端退出后 Server 独立存活。该记录仅覆盖
+上述主机的协议行为，不包含 Windows、安装界面、原生凭据持久化、签名或打包验收。
+包含随包兼容资格用例在内的全部 62 项 Rust 测试通过。
 
 #### Server 777bfdb7 protocol qualification
 
