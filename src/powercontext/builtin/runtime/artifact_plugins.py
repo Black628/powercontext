@@ -113,7 +113,6 @@ async def _restore_access_families(database) -> None:
 
 async def _process_window(spec: ArtifactPluginWorkerSpec, assignment: ArtifactProcessingWorkAssignment):  # noqa: C901 - One authorized window with preparation outside its commit.
     # Server authorization is reconstructed in this child using deployment identity.
-    from powercontext.server.authz import AccessAction, ResourceRef
     from powercontext.server.processing_security import open_worker_security
 
     definition = spec.definition
@@ -146,12 +145,6 @@ async def _process_window(spec: ArtifactPluginWorkerSpec, assignment: ArtifactPr
             await require_current_binding(connection, spec, assignment.scope_id)
             if security is not None:
                 await security.authorize_transaction(connection, assignment.scope_id)
-                await security.access.with_connection(connection).require(
-                    security.principal,
-                    AccessAction.SCOPE_READ,
-                    ResourceRef.scope(assignment.scope_id),
-                    context=security.context,
-                )
 
         invocation = ScopeInvocation(assignment, authorize_transaction=authorize)
         try:
@@ -304,18 +297,11 @@ async def _commit_window(
     validated = _validate_drafts(declaration, source_evidence, artifact_evidence, drafts)
     repository = custom_artifact_repository(declaration["family"], sources, prepared=prepared_indexes)
     async with database.transaction() as connection:
+        # The Worker guard rechecks Scope contribution, which includes evidence reads.
         await invocation.guard(connection)
         for draft in validated:
             resource = ResourceRef.artifact(assignment.scope_id, family=draft.family, artifact_id=draft.artifact_id)
             bound = None if security is None else security.access.with_connection(connection)
-            if bound is not None:
-                for ref in draft.artifact_refs:
-                    await bound.require(
-                        security.principal,
-                        AccessAction.ARTIFACT_READ,
-                        ResourceRef.artifact(assignment.scope_id, family=ref.family, artifact_id=ref.artifact_id),
-                        context=security.context,
-                    )
             prepared = RepositoryArtifactDraft(
                 family=draft.family,
                 content=StoredArtifactContent(schema_version=draft.schema_version, content=draft.content),

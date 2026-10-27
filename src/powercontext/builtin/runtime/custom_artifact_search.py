@@ -63,7 +63,7 @@ from powercontext.builtin.persistence.artifact_indexes import (
 from powercontext.builtin.persistence.custom_artifacts import custom_artifact_repository
 from powercontext.builtin.persistence.sqlite.profile import ensure_sqlite_vector_extension
 from powercontext.builtin.persistence.tables import ARTIFACT_HEADS_TABLE, ARTIFACT_PROCESSING_BINDING_STATES_TABLE
-from powercontext.server.authz import AccessAction, ResourceRef
+from powercontext.server.authz import AccessAction, BuiltinAuthorizationProvider, ResourceRef
 
 
 class ArtifactQueryVector(BaseModel):
@@ -292,6 +292,8 @@ class CustomArtifactSearcher:
                 if identity not in visible:
                     visible[identity] = (
                         bound is None
+                        # The same transaction already authorized this Scope's reads.
+                        or type(bound.provider) is BuiltinAuthorizationProvider
                         or (
                             await bound.check(
                                 execution.principal,

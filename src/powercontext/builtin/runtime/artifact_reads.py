@@ -33,7 +33,7 @@ from powercontext.builtin.persistence.tables import ARTIFACT_FAMILY_SCHEMAS_TABL
 from powercontext.builtin.records import BaseArtifactFamily, BaseValueNotFoundError, InvalidBaseAccessRequestError
 from powercontext.builtin.runtime.artifact_search import ArtifactSearchService
 from powercontext.builtin.runtime.custom_artifact_search import CustomArtifactSearcher
-from powercontext.server.authz import AccessAction, ResourceRef
+from powercontext.server.authz import AccessAction, BuiltinAuthorizationProvider, ResourceRef
 
 
 class _StoredJsonContent(RootModel[dict[str, JsonValue]]):
@@ -59,6 +59,8 @@ class ArtifactReadSession:
         self.database, self.scope_id = database, scope_id
         self.families = frozenset(families)
         self.access, self.principal, self.audit, self.guard = access, principal, audit, guard
+        # Only the exact built-in Provider guarantees Scope-to-Artifact read inheritance.
+        self._scope_covers_artifacts = access is None or type(access.provider) is BuiltinAuthorizationProvider
         self.refs: set[tuple[str, str, int]] = set()
         self.cursor = SignedCursorCodec()
         self.search_service = search_service or ArtifactSearchService(
@@ -80,7 +82,8 @@ class ArtifactReadSession:
             await connection.exec_driver_sql("SAVEPOINT pc_artifact_read")
             if self.guard is not None:
                 await self.guard(connection)
-            if self.access is not None:
+            # The Worker guard already checks current Scope contribution in this transaction.
+            if self.access is not None and (self.guard is None or not self._scope_covers_artifacts):
                 await self.access.for_read(connection).require(
                     self.principal,
                     AccessAction.SCOPE_READ,
@@ -121,7 +124,7 @@ class ArtifactReadSession:
                 if revision is None:
                     return None
                 raise BaseValueNotFoundError("artifact_revision", (family, artifact_id, revision)) from None
-            if self.access is not None:
+            if self.access is not None and not self._scope_covers_artifacts and family != "topic-memory":
                 await self.access.for_read(connection).require(
                     self.principal,
                     AccessAction.ARTIFACT_READ,
@@ -167,7 +170,7 @@ class ArtifactReadSession:
                     break
                 for artifact_id, revision in rows:
                     after = artifact_id
-                    if bound is not None:
+                    if bound is not None and not self._scope_covers_artifacts and family != "topic-memory":
                         decision = await bound.check(
                             self.principal,
                             AccessAction.ARTIFACT_READ,
