@@ -191,31 +191,33 @@ async def _seed(runtime: BuiltinRuntime, scope_id: str, texts: list[str]) -> Non
 async def _seed_topic_memories(
     runtime: BuiltinRuntime, scope_id: str, count: int, *, embedding_model: Any = None
 ) -> None:
-    provider = cast(Any, runtime._provider)
     for position in range(count):
         content = TopicMemoryContent(
             title=f"alpha beta topic {position:02d}",
             summary=f"Useful evidence {position}",
             detail="unrelated detail",
         )
-        projection = prepare_topic_memory_projection(content)
-        if embedding_model is not None:
-            chunks = chunk_topic_memory_detail(content.detail)
-            embedded = await embedding_model.embed((f"{content.title}\n{content.summary}", *(c.text for c in chunks)))
-            projection = prepare_topic_memory_projection(
-                content,
-                topic_embedding=embedded.vectors[0],
-                chunk_embeddings=embedded.vectors[1:],
-                embedding_profile=embedding_model.profile,
-            )
-        async with provider.database.transaction() as connection:
-            await provider.repositories.topic_memories.publish_create(
-                connection,
-                scope_id,
-                f"topic-over-cap-{position:02d}",
-                TopicMemoryDraft(content=content),
-                projection,
-            )
+        await _seed_topic_memory(runtime, scope_id, f"topic-over-cap-{position:02d}", content, embedding_model)
+
+
+async def _seed_topic_memory(
+    runtime: BuiltinRuntime, scope_id: str, key: str, content: TopicMemoryContent, embedding_model: Any = None
+) -> None:
+    provider = cast(Any, runtime._provider)
+    projection = prepare_topic_memory_projection(content)
+    if embedding_model is not None:
+        chunks = chunk_topic_memory_detail(content.detail)
+        embedded = await embedding_model.embed((f"{content.title}\n{content.summary}", *(c.text for c in chunks)))
+        projection = prepare_topic_memory_projection(
+            content,
+            topic_embedding=embedded.vectors[0],
+            chunk_embeddings=embedded.vectors[1:],
+            embedding_profile=embedding_model.profile,
+        )
+    async with provider.database.transaction() as connection:
+        await provider.repositories.topic_memories.publish_create(
+            connection, scope_id, key, TopicMemoryDraft(content=content), projection
+        )
 
 
 async def _create_scope(runtime: BuiltinRuntime, key: str, *, references: tuple[str, ...] = ()) -> str:
@@ -928,6 +930,61 @@ def test_a_spent_budget_keeps_the_cached_memory_vector_for_expansion(tmp_path) -
     assert vector_only in (prepared.content or "")
     # This is the external inference-attempt budget for one request: Atomic once, Topic once.
     assert embedding.query_calls == 2
+
+
+def test_a_spent_budget_keeps_the_cached_vector_for_topic_memory(tmp_path) -> None:
+    """Topic Memory keeps searching by vector with the query vector Atomic Memory obtained, after the budget is spent.
+
+    The provider answers Atomic Memory's query embedding only as the budget runs out: the vector arrives, and the wait
+    spends the budget. Topic Memory then searches with that cached vector instead of a new request, so a Topic Memory
+    that only the vector channel finds still reaches the prepared content.
+    """
+
+    budget = 0.2
+    vector_only = "orchard ledger"
+
+    class SlowAnswerEmbedding:
+        profile = EmbeddingProfile(profile_id="slow-answer", model="deterministic", dimension=2)
+
+        def __init__(self) -> None:
+            self.query_calls = 0
+
+        async def embed(self, texts: tuple[str, ...], /) -> EmbeddingResult:
+            if texts == (_QUERY,):
+                self.query_calls += 1
+                # Not yielding lets the answer arrive after the deadline instead of being cancelled at it.
+                time.sleep(budget * 1.5)  # noqa: ASYNC251
+            similarities = tuple(1.0 if text == _QUERY else 0.9 if vector_only in text else 0.1 for text in texts)
+            return EmbeddingResult(
+                vectors=tuple((similarity, math.sqrt(1.0 - similarity**2)) for similarity in similarities)
+            )
+
+    embedding = SlowAnswerEmbedding()
+
+    async def scenario() -> Any:
+        async with _runtime(
+            tmp_path / "spent-budget-topic.db",
+            RuntimeConfig(recall_embedding_timeout_seconds=budget),
+            embedding_model=embedding,
+        ) as runtime:
+            scope_id = await _create_scope(runtime, "spent-budget-topic")
+            await _seed(runtime, scope_id, ["alpha beta gamma evidence"])
+            await _seed_topic_memory(
+                runtime,
+                scope_id,
+                "vector-only-topic",
+                TopicMemoryContent(title=vector_only, summary="Seasonal accounts", detail="unrelated detail"),
+                embedding,
+            )
+            request = PrepareContextRequest.model_validate({"query": _QUERY, "max_bytes": 8000, "explain": True})
+            return await runtime.context.for_scope(scope_id).prepare(request)
+
+    prepared = asyncio.run(scenario())
+
+    assert prepared.reason is None
+    assert vector_only in (prepared.content or "")
+    # This is the external inference-attempt budget for one request: Topic Memory reuses Atomic Memory's vector.
+    assert embedding.query_calls == 1
 
 
 def test_empty_scope_is_no_content_and_does_not_expand(tmp_path, monkeypatch) -> None:
