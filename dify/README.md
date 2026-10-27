@@ -92,15 +92,17 @@ dify/
 # Windows
 python -m venv .venv-pc
 .venv-pc\Scripts\python.exe -m pip install "powercontext[server]==1.2.0"
-.venv-pc\Scripts\powercontext.exe server run --host 127.0.0.1 --port 8000
+.venv-pc\Scripts\powercontext.exe server run --host 127.0.0.1 --port 8000 --no-env-file
 ```
 
 ```bash
 # macOS / Linux
 python -m venv .venv-pc
 .venv-pc/bin/pip install "powercontext[server]==1.2.0"
-.venv-pc/bin/powercontext server run --host 127.0.0.1 --port 8000
+.venv-pc/bin/powercontext server run --host 127.0.0.1 --port 8000 --no-env-file
 ```
+
+> `--no-env-file` 表示不读取当前目录的 `.env`，避免环境里已有配置干扰；国内网络下载慢时可给 pip 加 `-i https://pypi.tuna.tsinghua.edu.cn/simple`。
 
 方式 B：使用本目录脚本（已安装 PowerContext，或就在 PowerContext 仓库里跑）
 
