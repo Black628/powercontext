@@ -46,7 +46,7 @@ dify/
 │   └── memory-audit.log          # entries + changes：账本内容与版本历史
 └── scripts/
     ├── run_powercontext.py       # 用已安装的 PowerContext 或在仓库里起服务（127.0.0.1:8000）
-    ├── validate_dsl.py           # DSL 静态校验（PyYAML，逐项对照 Dify 0.4.0 实体）
+    ├── validate_dsl.py           # DSL 静态校验（PyYAML；结构对照 0.4.0 样例，字段对照 Dify 1.9.2 实体）
     ├── replay_chatflow.py        # 不依赖 Dify 的图执行器：真实 HTTP + code 节点，LLM 用罐头输出
     ├── pc_http_demo.py           # 最小记忆链路演示（无 LLM、无 Dify 也能证明读写）
     ├── memory_audit.py           # 打印某位客人的账本与 revision 历史

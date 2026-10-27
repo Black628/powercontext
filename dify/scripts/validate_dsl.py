@@ -76,6 +76,22 @@ SEGMENT_TYPES = {
     "array[boolean]",
     "array[file]",
 }
+# api/core/workflow/nodes/code/entities.py: _ALLOWED_OUTPUT_FROM_CODE in Dify 1.9.2.
+# Code outputs are narrower than SegmentType: integer/float/secret/file/array[any]/array[file]
+# are valid segment types but rejected for code node outputs.
+CODE_OUTPUT_TYPES = {
+    "string",
+    "number",
+    "object",
+    "boolean",
+    "array[string]",
+    "array[number]",
+    "array[object]",
+    "array[boolean]",
+}
+# api/core/file/enums.py in Dify 1.9.2.
+FILE_TYPES = {"image", "document", "audio", "video", "custom"}
+FILE_TRANSFER_METHODS = {"remote_url", "local_file", "tool_file", "datasource_file"}
 # api/factories/variable_factory.py: accepted environment/conversation variable types.
 ENV_VALUE_TYPES = {
     "string",
@@ -197,6 +213,23 @@ class Checker:
                 self.warn(f"features.{key} missing; Dify fills a default on import")
         if not features.get("opening_statement"):
             self.warn("features.opening_statement is empty; the app opens with a blank page")
+        file_upload = features.get("file_upload")
+        if file_upload is not None:
+            if not isinstance(file_upload, dict):
+                self.err("features.file_upload must be an object")
+            else:
+                for file_type in file_upload.get("allowed_file_types") or []:
+                    if file_type not in FILE_TYPES:
+                        self.err(f"features.file_upload.allowed_file_types has unknown value {file_type!r}")
+                for method in file_upload.get("allowed_file_upload_methods") or []:
+                    if method not in FILE_TRANSFER_METHODS:
+                        self.err(f"features.file_upload.allowed_file_upload_methods has unknown value {method!r}")
+        for key in ("suggested_questions",):
+            questions = features.get(key)
+            if questions is not None and not (
+                isinstance(questions, list) and all(isinstance(item, str) for item in questions)
+            ):
+                self.err(f"features.{key} must be a list of strings")
 
     def check_nodes(self) -> None:
         if not self.nodes:
@@ -261,8 +294,11 @@ class Checker:
             self.err(f"{node_id}: outputs is empty")
         for name, spec in outputs.items():
             spec = spec or {}
-            if spec.get("type") not in SEGMENT_TYPES:
-                self.err(f"{node_id}.{name}: output type {spec.get('type')!r} is not a Dify SegmentType")
+            if spec.get("type") not in CODE_OUTPUT_TYPES:
+                self.err(
+                    f"{node_id}.{name}: output type {spec.get('type')!r} is not allowed for a Dify code node "
+                    f"(allowed: {sorted(CODE_OUTPUT_TYPES)})"
+                )
             children = spec.get("children")
             if children is not None and not isinstance(children, dict):
                 self.err(f"{node_id}.{name}: children must be null or an object")
