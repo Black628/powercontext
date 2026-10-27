@@ -40,6 +40,8 @@
 
 两者不互相替代：检索结果只有在作答之后才可能变成记忆，而记忆只影响下一轮检索与提示。
 
+工程质量：核心逻辑带 29 个离线单元测试（pytest），不依赖 seekdb / 网络 / PowerContext 即可回归，Windows 与 Linux 实测均 `29 passed`。
+
 ## 演示
 
 - **截图**：`{{SCREENSHOT_HOME}}`（首页与资料库）、`{{SCREENSHOT_SESSION}}`（复习卡与上下文）、`{{SCREENSHOT_EVIDENCE}}`（执行记录）。仓库内 `qoder/docs/screenshots/` 已附 4 张 1500×1150 实测截图（首页 / 复习 / 作答后 / 记忆面板），可直接上传。

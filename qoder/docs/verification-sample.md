@@ -64,6 +64,19 @@ export COACH_DATA_DIR="$HOME/.recall-coach"
 
 `active=5` 是「4 条薄弱点 + 1 条偏好」；同一条薄弱点重复答错时先**失效旧条目**再写新条目，所以计数不会随复习次数增长。
 
+在**全新空数据目录**（`COACH_DATA_DIR` 指向空文件夹、端口 8851）冷启动后跑同一脚本，结果同样是 `11/11 步通过`：首轮 `context/prepare` 为 0 字节、记忆 `active=1`（脚本刚写入的第一条），从第二轮起上下文才会带上上一轮的薄弱点。
+
+## 2.1 离线单元测试（补充证据）
+
+不依赖 seekdb、网络和 PowerContext，任何机器可跑，用于核对核心逻辑没被回归：
+
+```bash
+pip install -r requirements-dev.txt
+pytest -q tests
+```
+
+本机实测：Windows 与 WSL 各 `29 passed`（分词/切段、hash 向量、mirror 写入与聚合、RRF 去重、出题与评分、薄弱点去重、离线降级、偏好替换/修正）。
+
 ## 3. 手动核对 seekdb（检索结果如何进入流程）
 
 1. `POST /api/search`，体 `{"query":"死锁的四个必要条件","top_k":3}`；
@@ -110,3 +123,4 @@ py -3.12 -m venv .venv
 | `Unknown database 'recall_coach'` | 确认 `SEEKDB_DB` 与 `SEEKDB_PATH` 匹配；首次启动会自动建库 |
 | 检索只有向量通道 | 看 `/api/status` 的 `fts_parser`；若为空说明全文索引未建成功，检查 seekdb 日志 |
 | 端口占用 | `COACH_PORT=8849` 换端口，或用 `--port` 参数启动脚本 |
+| `pytest` 启动报 `No usable temporary directory found` | Windows 受限环境把 `TEMP`/`TMP` 指向可写目录后再跑，例如 `set TEMP=%CD%\.scratch\tmp` |

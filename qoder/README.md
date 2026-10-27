@@ -185,6 +185,18 @@ cd qoder
 
 截图由 CDP 驱动无头 Edge 在 1500×1150 视口下抓取，页面与数据都来自同一套 `app/` 代码。
 
+### 6.5 离线单元测试（不依赖 seekdb / 网络 / PowerContext）
+
+核心逻辑的单元测试只使用 SQLite 镜像后端与 fake memory，任何机器上都能跑：
+
+```bash
+pip install -r qoder/requirements-dev.txt
+cd qoder
+pytest -q tests
+```
+
+覆盖范围：分词/切段、内置 hash 向量、mirror 后端的写入与聚合、向量+全文 RRF 融合去重、出题（填空回溯、选项、无答案回退、公开卡片不泄漏答案）、评分掌握度、薄弱点记忆去重、PowerContext 离线降级、偏好替换与修正。本机 Windows 与 WSL 均为 `29 passed`；受限 Windows 若报 `No usable temporary directory found`，先把 `TEMP`/`TMP` 指向可写目录再运行。
+
 ## 7. 配置项
 
 | 变量 | 默认 | 说明 |
@@ -236,6 +248,7 @@ qoder/
 │       ├── base.py        # MaterialStore 契约、RRF、证据日志
 │       ├── seekdb.py      # seekdb 后端：向量 HNSW + 全文 FTS
 │       └── mirror.py      # SQLite 镜像后端（无 seekdb 时）
+├── tests/                 # 离线单元测试（pytest，不依赖 seekdb/网络）
 ├── web/                   # index.html / style.css / app.js（无构建）
 ├── scripts/
 │   ├── smoke.py           # 验证样例（stdlib）
@@ -246,6 +259,7 @@ qoder/
 │   ├── verification-sample.md        # 可复现的验证样例
 │   └── website.md                    # Qoder Sites 文案
 ├── requirements.txt
+├── requirements-dev.txt
 └── .env.example
 ```
 
@@ -260,7 +274,7 @@ qoder/
 - **Windows 没有 seekdb 运行时**：`pylibseekdb` 只提供 Linux/macOS wheel，因此 Windows 上走 SQLite 镜像后端；功能与界面一致，但 SQL 会标注为镜像实现。
 - **PowerContext 需要 Python 服务端**：Windows 上 `pip install 'powercontext[server,client]' pymysql` 后可复用嵌入式 Server（本机实测 11/11）；未安装时记忆离线，属于设计内的降级。
 - **内置 hash 向量是演示级语义近似**：它依赖字面重合，适合零配置复现；要获得真实语义检索，按 5.5 配置 embedding 模型。
-- 单机演示，无用户体系；`scope` 按学习者一人一份，导游 `COACH_PC_SCOPE_ID` 可复用既有 scope。
+- 单机演示，无用户体系；`scope` 按学习者一人一份，保存在 `COACH_DATA_DIR/scope.json`，重启后复用同一 scope。
 
 ## 12. 评审复现对照
 
