@@ -76,7 +76,7 @@ dify/
 | DSL | `version: 0.4.0`，`mode: advanced-chat`，`dependencies: []`（无插件依赖） |
 | PowerContext | **1.2.0**（PyPI：`powercontext[server,cli]`；`cli` 提供 `powercontext` 命令所需的 typer，只跑随附脚本则可省），SQLite + FTS5 持久化，无需 Embedding / Rerank |
 | Python | 3.11+（PowerContext 与随附脚本；3.13.5 实测） |
-| 模型 | 任意 OpenAI 兼容 chat 模型；DSL 默认 `langgenius/openai/openai` + `gpt-4o-mini`，导入后按第 5.3 步改成你账号下可用的模型 |
+| 模型 | 任意 OpenAI 兼容 chat 模型；DSL 默认 `langgenius/openai/openai` + `gpt-4o-mini`，导入后按第 5.3 步改成你账号下可用的模型（如 DeepSeek 安装供应商插件后选 `deepseek-chat`） |
 | 网络 | Dify 需要能访问 PowerContext 的 8000 端口；两个 LLM 节点需要能访问你配置的模型服务。无其他外网依赖 |
 | 资源 | 2 vCPU / 2 GB 内存足够跑 Dify + PowerContext（PowerContext 空载常驻约 100 MB） |
 
@@ -126,6 +126,8 @@ curl.exe http://127.0.0.1:8000/health/ready
 ### 5.2 导入 DSL
 
 Dify → 工作室 → 创建/导入 → **导入 DSL 文件** → 选择 `dify/dsl/grudge-inn.chatflow.yml`。
+
+本作品只有一个 DSL 文件，不存在多文件导入顺序；`dify/` 下其余文件是运行说明、验证样例、证据和辅助脚本，Dify 不需要读取。
 
 导入后确认：应用类型为 Chatflow，12 个节点齐全，环境变量里有 `pc_base_url`。
 
