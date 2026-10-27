@@ -45,9 +45,34 @@ from tests.builtin.persistence.test_artifact_indexes import PROFILE, body, decla
 from tests.builtin.persistence.test_mysql_migration_runner import (
     _apply,
     _full_server_runner,
+    _interrupt_after_ddl,
     backend,  # noqa: F401 - Real disposable backend fixture.
 )
 from tests.e2e.atomic_memory_migration_backend import migration_profile
+
+
+def test_fixed_artifact_storage_resumes_after_registration_columns(backend):  # noqa: F811
+    runner = _full_server_runner(backend)
+    _interrupt_after_ddl(
+        runner,
+        "ALTER TABLE pc_artifact_processing_binding_states ADD COLUMN plugin_id",
+        policy="auto",
+    )
+    (journal,) = backend.evidence_directory.rglob("maintenance.json")
+    interrupted = json.loads(journal.read_text())
+    assert interrupted["last_revision"] == "s1402"
+    assert interrupted["pending_revision"] == "v1_5_0_001"
+    recovery = _full_server_runner(backend).plan()
+    assert recovery.state == "recovery_required" and recovery.source_revision == "s1402"
+    # The DDL returned and its owned connection closed before the injected failure.
+    resumed = _full_server_runner(backend, acknowledge_previous_run=(recovery.coordination or {}).get("pending_run_id"))
+    result = _apply(resumed)
+    assert result.state == "ready" and result.revision == resumed.bundle.head
+    assert resumed.verify().state == "ready"
+    completed = json.loads(journal.read_text())
+    assert completed["state"] == "complete"
+    assert completed["maintenance_window_id"] == interrupted["maintenance_window_id"]
+    assert completed["source_fingerprint"] == interrupted["source_fingerprint"]
 
 
 def _next_fixed_revision(bundle, directory):
