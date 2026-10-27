@@ -22,13 +22,36 @@ cargo test --locked --manifest-path desktop/src-tauri/Cargo.toml
 
 ## Compatibility scope
 
-[compatibility.json](src-tauri/src/connections/compatibility.json) records qualified Server sources, OpenAPI digests and wheel digests. The merged OpenAPI contract requires a new Server protocol qualification before ordinary Desktop builds can select it. Historical profiles remain available for their recorded deployments; selection requires an explicit matching profile and a connection check. CI builds have separate artifact identities and do not change product qualification.
+[compatibility.json](src-tauri/src/connections/compatibility.json) records qualified Server sources, OpenAPI digests and wheel digests. The current contract is qualified by `sqlite-atomic-44f934e8-v1` below. Ordinary builds require explicitly selecting the record matching the deployed Server source and wheel, then checking the connection. Historical profiles remain available for their recorded deployments but do not match the current contract. CI builds have separate artifact identities and do not change product qualification.
 
 The real Server harness covers SQLite with anonymous loopback, static Bearer, HTTPS with explicit CA/base path, and injected-provider/enforced access. It exercises save/search/exact reads, identity changes, binding revocation, ambiguous writes without replay and Scope pagination. Installed UI checks cover repeated launches preserving the existing editor, late committed-save responses preserving a new Scope draft, explicit connection/Scope selection, clipboard copies, connection isolation, draft cancellation, byte limits and independent Server survival after Desktop exit.
 
 Selecting a compatibility profile does not attest the remote binary identity. Existing `sqlite-1.1.1-v1` / `sqlite-63f918b7-v1` / `sqlite-ab43e3a7-v1` / `sqlite-f1089f4e-v1` / `sqlite-6e237568-v1` / `sqlite-legacy-58f7f4f6-v1` selections require explicitly choosing an available matching profile and rechecking the connection. Desktop reads memories only through Atomic Memory references, so Servers that answer only with Memory entry citations are not qualified. CLI diagnostics separately verify the registered executable path and digest, then validate the diagnostic response schema. The observed version is optional report information; a registration does not require a version.
 
 ### Current Server protocol qualification
+
+#### Server 44f934e8 protocol qualification
+
+`sqlite-atomic-44f934e8-v1` qualifies Server source
+`44f934e8023dda7ba7c716d6ad29a962b8d61503` for OpenAPI digest
+`38125b91c8956b443ec7e7686bbc85147b8f3bc3f8fc3968926eeb1f806411c2`.
+The qualification wheel is `powercontext-1.3.1.dev279+g44f934e80-py3-none-any.whl`,
+SHA-256 `f7f2b8dcc0a6c49fff13ffc1fd27df1b42eb0968755906a279a34679c6136003`,
+built from the clean source commit. This development wheel is not a published release.
+
+On 2026-10-27, macOS 15.7.4 ARM64 with Python 3.11.15 and Rust 1.97.1 ran
+the native `ConnectionManager` and `server_probe` against the extracted wheel
+and independent SQLite Server processes. All four modes passed: anonymous
+loopback, static Bearer, HTTPS with an explicit CA/base path, and an injected
+provider with enforced access. The provider mode also exercised identity
+changes, revocation of exact reads, and Scope pagination. Every mode confirmed
+that the Server survives the Desktop probe and that a committed write with a
+lost response remains unknown without replay. The ignored report is under
+`desktop/.artifacts/real-server.json`.
+
+This qualifies the recorded source, contract and wheel for SQLite protocol
+behavior on that host; it does not qualify the installed UI, Windows, signing,
+notarization, IME or screen-reader behavior.
 
 #### Server 8252ebb5 protocol qualification
 
