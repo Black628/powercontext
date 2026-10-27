@@ -80,6 +80,9 @@ class ServerVectorProfile:
             layouts["s1402"] = layouts["s1401"] + [
                 ["table", "pc_portable_restore_receipts", "pc_portable_restore_receipts", receipt]
             ]
+        if "s1403" in manifest["revision_resources"]:
+            ledger = json.loads((directory / "schemas/sqlite-s1403.json").read_text(encoding="utf-8"))["create"]
+            layouts["s1403"] = layouts["s1402"] + [registry_row(statement) for statement in ledger]
         for entries in layouts.values():
             entries.sort(key=lambda row: (row[0], row[1]))
         return layouts
@@ -102,6 +105,21 @@ class ServerVectorProfile:
 
     def mysql_tables(self) -> dict[str, str]:
         return copy.deepcopy(self.layout["mysql"])
+
+
+def registry_row(statement: str) -> list[str]:
+    """Map one frozen DDL statement onto the identity row SQLite would record."""
+
+    tokens = statement.split()
+    if len(tokens) < 3 or tokens[0].upper() != "CREATE":
+        raise MigrationError("invalid_bundle", "A frozen schema statement is not a CREATE.")
+    kind = tokens[1].upper()
+    if kind == "TABLE":
+        name = tokens[2]
+        return ["table", name, name, statement]
+    if kind == "INDEX" and len(tokens) > 4 and tokens[3].upper() == "ON":
+        return ["index", tokens[2], tokens[4], statement]
+    raise MigrationError("invalid_bundle", "A frozen schema statement has no registry identity.")
 
 
 def read_embedding_profile(connection: Connection) -> EmbeddingProfile | None:

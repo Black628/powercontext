@@ -1160,9 +1160,12 @@ WORK_KEYS_TABLE = Table(
     "pc_work_keys",
     SHARED_METADATA,
     Column("logical_key", identity_string(64), primary_key=True),
-    Column("work_id", identity_string(36), nullable=False, unique=True),
+    Column("work_id", identity_string(36), nullable=False),
     Column("lane_key", identity_string(64), nullable=False),
     Column("created_at", _coordination_timestamp_type(), nullable=False),
+    # Named so the frozen migration bundle can register the exact constraint:
+    # an anonymous UNIQUE has no identity to verify on OceanBase.
+    UniqueConstraint("work_id", name="uq_pc_work_keys_work_id"),
 )
 
 WORK_ATTEMPTS_TABLE = Table(
