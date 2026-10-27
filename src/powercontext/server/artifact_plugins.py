@@ -42,6 +42,8 @@ from powercontext.builtin.persistence.tables import (
     ARTIFACT_HEADS_TABLE,
     ARTIFACT_PROCESSING_BINDING_STATES_TABLE,
     ARTIFACT_SEARCH_STATES_TABLE,
+    ARTIFACT_VECTOR_INDEXES_TABLE,
+    ARTIFACT_VECTOR_SPACES_TABLE,
     SCOPES_TABLE,
 )
 from powercontext.builtin.records import BaseValueConflictError, BaseValueNotFoundError, InvalidBaseAccessRequestError
@@ -112,6 +114,7 @@ class ArtifactPluginManager:
         self._index_task: asyncio.Task[None] | None = None
         self._index_failures: set[tuple[str, str]] = set()
         self._index_refresh_families: set[str] = set()
+        self._space_failures: set[str] = set()
 
     async def __aenter__(self):
         async with self.database.transaction() as connection:
@@ -561,14 +564,33 @@ class ArtifactPluginManager:
         states = ARTIFACT_SEARCH_STATES_TABLE
         while True:
             try:
+                # Persisted unfinished declarations also cover registration by
+                # another Server, including families with no content or Scope.
+                async with self.database.transaction() as connection:
+                    spaces = ARTIFACT_VECTOR_SPACES_TABLE
+                    definitions = ARTIFACT_VECTOR_INDEXES_TABLE
+                    unfinished = await connection.scalars(
+                        select(definitions.c.family)
+                        .join(spaces, definitions.c.space_id == spaces.c.space_id)
+                        .where(spaces.c.provision_state == "declared")
+                        .distinct()
+                    )
+                    self._index_refresh_families.update(unfinished)
                 # Startup and initial registration discover related pairs needing initialization.
                 for family in tuple(self._index_refresh_families):
                     self._index_refresh_families.discard(family)
                     try:
+                        from powercontext.builtin.persistence.artifact_vector_space import prepare_family_spaces
+
+                        await prepare_family_spaces(self.database, family)
+                        self._space_failures.discard(family)
                         complete = await self._refresh_search(family)
-                    except SQLAlchemyError:
+                    except Exception:
                         self._index_refresh_families.add(family)
-                        raise
+                        if family not in self._space_failures:
+                            self._space_failures.add(family)
+                            log_safely(logger, logging.WARNING, "Artifact search maintenance unavailable; retrying")
+                        continue
                     if not complete:
                         self._index_refresh_families.add(family)
                 async with self.database.transaction(consistent_snapshot=True) as connection:
@@ -581,6 +603,9 @@ class ArtifactPluginManager:
                     async with self._index_locks.setdefault(family, asyncio.Lock()):
                         complete = False
                         try:
+                            from powercontext.builtin.persistence.artifact_vector_space import prepare_family_spaces
+
+                            await prepare_family_spaces(self.database, family)
                             await self.index_builder.refresh(scope, family)
                             complete = await self.index_builder.build(scope, family)
                         except Exception:

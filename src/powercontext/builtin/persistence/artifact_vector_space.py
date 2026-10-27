@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Server-owned OceanBase/seekDB VECTOR spaces, provisioned during database initialization."""
+"""Server-owned OceanBase/seekDB VECTOR spaces, prepared from durable declarations."""
 
 import re
 from hashlib import sha256
@@ -25,15 +25,14 @@ from sqlalchemy import (
     MetaData,
     Table,
     UniqueConstraint,
-    inspect,
     select,
-    text,
     update,
 )
 
 from powercontext.builtin.artifacts.memory.canonical import canonical_json
 from powercontext.builtin.artifacts.memory.models import EmbeddingProfile
 from powercontext.builtin.persistence.tables import (
+    ARTIFACT_VECTOR_INDEXES_TABLE,
     ARTIFACT_VECTOR_SPACES_TABLE,
     ARTIFACT_VECTORS_TABLE,
     SHARED_METADATA,
@@ -86,67 +85,154 @@ def native_vector_table(space):
     )
 
 
-def verify_native_space(connection, space):  # noqa: C901 - Verify one complete physical space contract.
+def native_space_layout(space):
+    """The one exact framework template shared by preparation and migration."""
+    from sqlalchemy.dialects import mysql
+    from sqlalchemy.schema import CreateTable
+
+    from powercontext.builtin.persistence.migrations.mysql_schema import _parse_table
+
     table = native_vector_table(space)
-    inspector = inspect(connection)
-    if not inspector.has_table(table.name):
+    _, layout = _parse_table(str(CreateTable(table).compile(dialect=mysql.dialect())))
+    for index in table.indexes:
+        layout["indexes"][index.name] = {
+            "columns": [[column.name, None, "asc"] for column in index.columns],
+            "unique": index.unique,
+        }
+    return layout
+
+
+def inspect_native_space(space, actual, *, allow_incomplete=False):
+    """Return missing indexes only for an exact, declared creation intermediate."""
+    import copy
+
+    from powercontext.builtin.persistence.migrations.mysql_schema import _matches
+
+    expected = native_space_layout(space)
+    if space["backend"] != "mysql" or space["provision_state"] not in {"declared", "ready"}:
+        raise ValueError("invalid native vector space declaration")  # noqa: TRY003
+    incomplete = allow_incomplete and space["provision_state"] == "declared"
+    if actual is None:
+        if incomplete:
+            return tuple(expected["indexes"])
         raise ValueError("vector space physical table is absent")  # noqa: TRY003
-    columns = {column["name"]: column for column in inspector.get_columns(table.name)}
-    if set(columns) != set(table.c.keys()):
-        raise ValueError("vector space physical columns differ from the registered format")  # noqa: TRY003
-    vector_type = connection.execute(
-        text(
-            "SELECT column_type FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=:name AND column_name='embedding'"
-        ),
-        {"name": table.name},
-    ).scalar_one()
-    if str(vector_type).lower().replace(" ", "") != f"vector({space['dimension']})":
-        raise ValueError("vector space physical dimension differs from its profile")  # noqa: TRY003
-    if inspector.get_pk_constraint(table.name)["constrained_columns"] != ["vector_id"]:
-        raise ValueError("vector space primary key is incompatible")  # noqa: TRY003
-    unique = {tuple(item["column_names"]) for item in inspector.get_unique_constraints(table.name)}
-    if ("build_id", "index_def_id", "artifact_id", "fragment_id") not in unique:
-        raise ValueError("vector space fragment identity constraint is absent")  # noqa: TRY003
-    foreign = {
-        (tuple(fk["constrained_columns"]), fk["referred_table"], tuple(fk["referred_columns"]))
-        for fk in inspector.get_foreign_keys(table.name)
-    }
-    for constraint in table.foreign_key_constraints:
-        if (
-            tuple(constraint.columns.keys()),
-            constraint.referred_table.name,
-            tuple(element.column.name for element in constraint.elements),
-        ) not in foreign:
-            raise ValueError("vector space foreign key differs from the registered format")  # noqa: TRY003
-    actual_indexes = {tuple(item["column_names"]) for item in inspector.get_indexes(table.name)}
-    if ("scope_id", "family", "build_id", "space_id", "index_def_id", "artifact_id") not in actual_indexes:
-        raise ValueError("vector space search isolation index is absent")  # noqa: TRY003
-    collation_rows = connection.execute(
-        text(
-            "SELECT column_name, collation_name FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=:name"
-        ),
-        {"name": table.name},
-    ).all()
-    identities = {
-        "vector_id",
-        "scope_id",
-        "family",
-        "artifact_id",
-        "schema_version",
-        "index_def_id",
-        "build_id",
-        "fragment_id",
-        "input_hash",
-        "space_id",
-    }
-    if any(collation != "utf8mb4_bin" for name, collation in collation_rows if name in identities):
-        raise ValueError("vector space identities require binary collation")  # noqa: TRY003
-    if any(column["nullable"] for column in columns.values()):
-        raise ValueError("vector space columns must be nonnullable")  # noqa: TRY003
+    partial = copy.deepcopy(expected)
+    missing = tuple(name for name in expected["indexes"] if name not in actual["indexes"])
+    # Unique constraints are part of CREATE TABLE, only standalone indexes can
+    # be absent after interruption between table and index creation.
+    allowed_missing = {index.name for index in native_vector_table(space).indexes}
+    if missing and (not incomplete or not set(missing) <= allowed_missing):
+        raise ValueError("vector space required indexes are absent")  # noqa: TRY003
+    for name in missing:
+        del partial["indexes"][name]
+    if not _matches({"tables": {"space": actual}}, {"tables": {"space": partial}}):
+        raise ValueError("vector space physical structure differs from its registered format")  # noqa: TRY003
+    return missing
+
+
+def registered_native_layouts(declarations, tables, *, allow_declared=False):
+    """Admit only declared identities with the exact supported physical format."""
+    layouts = {}
+    names = set()
+    for space in declarations:
+        name = space["physical_table"]
+        if name in names or (space["provision_state"] != "ready" and not allow_declared):
+            raise ValueError("native vector space preparation is incomplete or duplicated")  # noqa: TRY003
+        names.add(name)
+        actual = tables.get(name)
+        inspect_native_space(space, actual, allow_incomplete=allow_declared)
+        if actual is not None:
+            layouts[name] = actual
+    return layouts
+
+
+def _physical_layout(connection, name):
+    from sqlalchemy import inspect
+
+    from powercontext.builtin.persistence.migrations.mysql_schema import _parse_table
+
+    if not inspect(connection).has_table(name):
+        return None
+    # The name has already passed native_vector_table's fixed hex identity check.
+    row = connection.exec_driver_sql(f"SHOW CREATE TABLE `{name}`").one()
+    database = connection.exec_driver_sql("SELECT DATABASE()").scalar_one()
+    return _parse_table(row[1], database=database)[1]
+
+
+def verify_native_space(connection, space):
+    table = native_vector_table(space)
+    inspect_native_space(space, _physical_layout(connection, table.name))
+
+
+def provision_native_space(connection, space):
+    """Converge using atomic database DDL, then inspect before publishing ready."""
+    from sqlalchemy.exc import DBAPIError
+    from sqlalchemy.schema import CreateTable
+
+    table = native_vector_table(space)
+    actual = _physical_layout(connection, table.name)
+    missing = inspect_native_space(space, actual, allow_incomplete=True)
+    if space["provision_state"] == "ready":
+        return
+    if actual is None:
+        # IF NOT EXISTS serializes competing CREATEs at the backend. It is not
+        # admission: the resulting definition must still match exactly.
+        connection.execute(CreateTable(table, if_not_exists=True))
+        missing = inspect_native_space(space, _physical_layout(connection, table.name), allow_incomplete=True)
+    for index in table.indexes:
+        if index.name not in missing:
+            continue
+        try:
+            index.create(connection)
+        except DBAPIError as error:
+            # A concurrent creator may have won this particular index. No other
+            # failure is normalized, and the full structure is checked below.
+            arguments = getattr(error.orig, "args", ())
+            if not arguments or arguments[0] != 1061:
+                raise
+    verify_native_space(connection, space)
+    connection.execute(
+        update(ARTIFACT_VECTOR_SPACES_TABLE)
+        .where(
+            ARTIFACT_VECTOR_SPACES_TABLE.c.space_id == space["space_id"],
+            ARTIFACT_VECTOR_SPACES_TABLE.c.provision_state == "declared",
+        )
+        .values(provision_state="ready")
+    )
+
+
+async def prepare_family_spaces(database, family):
+    """Await only this family's durable spaces, outside registration transactions."""
+    if database.engine.dialect.name == "sqlite":
+        return
+    spaces = ARTIFACT_VECTOR_SPACES_TABLE
+    definitions = ARTIFACT_VECTOR_INDEXES_TABLE
+    async with database.transaction() as connection:
+        declarations = (
+            (
+                await connection.execute(
+                    select(spaces).where(
+                        spaces.c.space_id.in_(select(definitions.c.space_id).where(definitions.c.family == family))
+                    )
+                )
+            )
+            .mappings()
+            .all()
+        )
+    for space in declarations:
+        # DDL may commit independently. This connection owns no content or
+        # plugin registration writes; ready is committed only after verification.
+        async with database.transaction() as connection:
+            current = (
+                (await connection.execute(select(spaces).where(spaces.c.space_id == space["space_id"])))
+                .mappings()
+                .one()
+            )
+            await connection.run_sync(lambda sync, current=current: provision_native_space(sync, current))
 
 
 def provision_native_spaces(connection):
-    """Create registered spaces using the database initialization connection."""
+    """Prepare persisted native declarations during unmanaged initialization."""
     spaces = (
         connection
         .execute(select(ARTIFACT_VECTOR_SPACES_TABLE).where(ARTIFACT_VECTOR_SPACES_TABLE.c.backend == "mysql"))
@@ -154,11 +240,4 @@ def provision_native_spaces(connection):
         .all()
     )
     for space in spaces:
-        table = native_vector_table(space)
-        table.create(connection, checkfirst=True)
-        verify_native_space(connection, space)
-        connection.execute(
-            update(ARTIFACT_VECTOR_SPACES_TABLE)
-            .where(ARTIFACT_VECTOR_SPACES_TABLE.c.space_id == space["space_id"])
-            .values(provision_state="ready")
-        )
+        provision_native_space(connection, space)

@@ -64,7 +64,7 @@ def test_vector_search_through_http_and_spawned_worker(migration_backend):
     if isinstance(config, OceanBaseConfig):
         database["url"] = config.url.get_secret_value()
 
-    async def register():
+    async def exercise():
         async with running_server(directory, database_settings=database) as client:
             scope = await create_scope(client, "vector-search")
             plugin = deploy_plugin(EXAMPLE, directory / "vector-plugin", [scope])
@@ -85,12 +85,6 @@ def test_vector_search_through_http_and_spawned_worker(migration_backend):
             )
             entry.write_text(entry.read_text() + _DECLARATION + pipeline, encoding="utf-8")
             await reload_plugin(client, directory, plugin, 0)
-            return scope
-
-    scope = asyncio.run(register())
-
-    async def exercise():
-        async with running_server(directory, database_settings=database) as client:
             await enable_all(client)
             first = await _write_report(
                 client, scope, "first", "a", "数据库 timeout", fragments=body("", *([[0, 0]] * 8))["fragments"]

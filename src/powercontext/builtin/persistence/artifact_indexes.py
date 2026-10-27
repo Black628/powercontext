@@ -163,39 +163,50 @@ async def register_definition(connection, family, version, index):
     if isinstance(index, VectorIndex):
         fingerprint = sha256(canonical_json(index.profile.model_dump(mode="json"))).hexdigest()
         backend = connection.dialect.name
+        space = uuid4().hex
+        values = {
+            "space_id": space,
+            "profile_fingerprint": fingerprint,
+            "profile_json": index.profile.model_dump(mode="json"),
+            "dimension": index.profile.dimension,
+            "distance": index.profile.distance,
+            "normalization": index.profile.normalization,
+            "storage_format_version": FORMAT,
+            "backend": backend,
+            "physical_table": "pc_artifact_vectors" if backend == "sqlite" else f"pc_av_{space}",
+            "provision_state": "ready" if backend == "sqlite" else "declared",
+        }
+        if backend == "sqlite":
+            from sqlalchemy.dialects.sqlite import insert as space_insert
+
+            statement = (
+                space_insert(SPACES)
+                .values(**values)
+                .on_conflict_do_nothing(index_elements=["backend", "profile_fingerprint", "storage_format_version"])
+            )
+        else:
+            from sqlalchemy.dialects.mysql import insert as space_insert
+
+            statement = space_insert(SPACES).values(**values).on_duplicate_key_update(backend=backend)
+        await connection.execute(statement)
         space_row = (
             (
                 await connection.execute(
-                    select(SPACES).where(
+                    select(SPACES)
+                    .where(
                         SPACES.c.backend == backend,
                         SPACES.c.profile_fingerprint == fingerprint,
                         SPACES.c.storage_format_version == FORMAT,
                     )
+                    .with_for_update()
                 )
             )
             .mappings()
-            .first()
+            .one()
         )
-        if space_row is None:
-            space = uuid4().hex
-            await connection.execute(
-                insert(SPACES).values(
-                    space_id=space,
-                    profile_fingerprint=fingerprint,
-                    profile_json=index.profile.model_dump(mode="json"),
-                    dimension=index.profile.dimension,
-                    distance=index.profile.distance,
-                    normalization=index.profile.normalization,
-                    storage_format_version=FORMAT,
-                    backend=backend,
-                    physical_table="pc_artifact_vectors" if backend == "sqlite" else f"pc_av_{space}",
-                    provision_state="ready" if backend == "sqlite" else "declared",
-                )
-            )
-        else:
-            if space_row["profile_json"] != index.profile.model_dump(mode="json"):
-                raise ValueError("vector space fingerprint collision")  # noqa: TRY003
-            space = space_row["space_id"]
+        if space_row["profile_json"] != index.profile.model_dump(mode="json"):
+            raise ValueError("vector space fingerprint collision")  # noqa: TRY003
+        space = space_row["space_id"]
     identity = {
         "family": family,
         "schema_version": version,
@@ -608,7 +619,7 @@ async def projection_table(connection, definition):
         (await connection.execute(select(SPACES).where(SPACES.c.space_id == definition["space_id"]))).mappings().one()
     )
     if space["provision_state"] != "ready":
-        raise ArtifactSearchUnavailable(definition["family"], "vector space requires database initialization")
+        raise ArtifactSearchUnavailable(definition["family"], "vector space preparation is incomplete")
     if connection.dialect.name == "sqlite":
         return VECTORS
     from powercontext.builtin.persistence.artifact_vector_space import native_vector_table
