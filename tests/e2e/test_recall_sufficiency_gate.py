@@ -47,6 +47,7 @@ from powercontext.builtin.artifacts.topic_memory import (
     chunk_topic_memory_detail,
     prepare_topic_memory_projection,
 )
+from powercontext.builtin.artifacts.topic_memory.search import bounded_topic_memory_query
 from powercontext.builtin.inference import EmbeddingResult, InferenceUnavailableError
 from powercontext.builtin.persistence.records import RelationalRecordService
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
@@ -864,6 +865,69 @@ def test_work_between_embedding_waits_does_not_spend_the_preparation_budget(tmp_
     assert memory_embedding.answered
     assert topic_embedding.answered
     assert prepared.reason is None
+
+
+def test_a_spent_budget_keeps_the_cached_memory_vector_for_expansion(tmp_path) -> None:
+    """A spent budget stops new embedding requests, not the use of a query vector already obtained.
+
+    Atomic Memory embeds the query at once. A query this long gets its own bounded Topic Memory embedding, which times
+    out and spends the budget. The vector-only Memory below round zero's semantic floor must still be admitted by the
+    expansion round through the cached Atomic vector, without another provider call.
+    """
+
+    query = " ".join((_QUERY, *(f"term{index:02d}" for index in range(70))))
+    topic_query = bounded_topic_memory_query(query)
+    assert topic_query != query
+    vector_only = "unrelated vector evidence"
+    profile = EmbeddingProfile(
+        profile_id="spent-budget", model="deterministic", dimension=2, distance="l2", normalization="unit"
+    )
+
+    class AtomicFastTopicSlowEmbedding:
+        def __init__(self) -> None:
+            self.profile = profile
+            self.query_calls = 0
+
+        async def embed(self, texts: tuple[str, ...], /) -> EmbeddingResult:
+            if query in texts:
+                self.query_calls += 1
+                await asyncio.sleep(0.05)
+            elif topic_query in texts:
+                self.query_calls += 1
+                await asyncio.sleep(5)
+            similarities = tuple(
+                1.0 if text == query else 0.2 if text == vector_only else 0.31 for text in map(_embedded_body, texts)
+            )
+            return EmbeddingResult(
+                vectors=tuple((similarity, math.sqrt(1.0 - similarity**2)) for similarity in similarities)
+            )
+
+    embedding = AtomicFastTopicSlowEmbedding()
+
+    async def scenario() -> Any:
+        async with _runtime(
+            tmp_path / "spent-budget.db",
+            RuntimeConfig(recall_gate_enabled=True, recall_gate_min_candidates=1),
+            embedding_model=embedding,
+        ) as runtime:
+            scope_id = await _create_scope(runtime, "spent-budget")
+            await _seed(runtime, scope_id, ["alpha beta gamma vector evidence", vector_only])
+            await _seed_topic_memories(runtime, scope_id, 1, embedding_model=embedding)
+            # SQLite's optional math functions are not part of the backend requirements.
+            provider = cast(Any, runtime._provider)
+            async with provider.database.transaction() as connection:
+                driver = (await connection.get_raw_connection()).driver_connection
+                assert driver is not None
+                await driver.create_function("power", 2, None)
+            request = PrepareContextRequest.model_validate({"query": query, "max_bytes": 8000, "explain": True})
+            return await runtime.context.for_scope(scope_id).prepare(request)
+
+    prepared = asyncio.run(scenario())
+
+    assert prepared.reason == "inference_timeout"
+    assert vector_only in (prepared.content or "")
+    # This is the external inference-attempt budget for one request: Atomic once, Topic once.
+    assert embedding.query_calls == 2
 
 
 def test_empty_scope_is_no_content_and_does_not_expand(tmp_path, monkeypatch) -> None:

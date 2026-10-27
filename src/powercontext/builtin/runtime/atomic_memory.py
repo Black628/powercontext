@@ -746,16 +746,18 @@ class ScopedAtomicMemory:
         capabilities = application.index.capabilities
         profile = capabilities.embedding_profile
         requested_mode = mode
+        reusable = reuse is not None and reuse.embedding_profile == profile
         if mode == "auto":
             mode = "hybrid" if profile is not None else "text"
-            if not allow_embedding and capabilities.fts:
+            # Disallowing embedding stops new provider requests; a matching cached vector needs none.
+            if not allow_embedding and capabilities.fts and not reusable:
                 return "text", None, None, 0, None
         if mode not in {"vector", "hybrid"}:
             return mode, None, None, 0, None
         model = application.embedding_model
         if profile is None or model is None or model.profile != profile:
             raise AtomicMemoryIndexError("embedding-profile", "Requested vector retrieval is unavailable")
-        if reuse is not None and reuse.embedding_profile == profile:
+        if reuse is not None and reusable:
             return mode, reuse.query_vector, reuse, 0, None
         try:
             async with asyncio.timeout(embedding_timeout_seconds):

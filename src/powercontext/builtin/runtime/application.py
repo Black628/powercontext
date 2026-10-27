@@ -475,7 +475,8 @@ class _EmbeddingBudget:
 
     Only the waits are charged, so database reads, Experience recall and reranking between two searches do not take a
     later search's share. A spent budget is reached only through an embedding that timed out, which already recorded
-    the preparation's degradation cause, so a later search can skip its embedding without losing that cause.
+    the preparation's degradation cause, so a later search can skip its embedding without losing that cause. A spent
+    budget stops new embedding requests only: a query vector an earlier search obtained needs no wait and stays usable.
     """
 
     remaining: float

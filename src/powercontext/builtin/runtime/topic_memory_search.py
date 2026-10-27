@@ -153,7 +153,15 @@ class TopicMemorySearcher:
         plan: TopicSearchPlan | None = None,
         execution_context: ArtifactSearchExecutionContext | None = None,
     ) -> tuple[TopicMemorySearchResult, str | None]:
-        embedding = embedding_model if allow_embedding and (plan is None or plan.mode != "fts") else None
+        embedding = embedding_model if plan is None or plan.mode != "fts" else None
+        reusable = (
+            embedding is not None
+            and query_embedding is not None
+            and query_embedding.embedding_profile == embedding.profile
+        )
+        # Disallowing embedding stops new provider requests; a matching cached vector needs none.
+        if not allow_embedding and not reusable:
+            embedding = None
         keywords: dict[str, Any] = {"limit": limit}
         if admission is not None:
             keywords["admission"] = admission
@@ -165,7 +173,7 @@ class TopicMemorySearcher:
             result = await self._search(scope_id, query, mode="fts", **keywords)
             return result.model_copy(update={"embedding_calls": 0}), None
         mode = "hybrid" if plan is None else plan.mode
-        if query_embedding is not None and query_embedding.embedding_profile == embedding.profile:
+        if query_embedding is not None and reusable:
             result = await self._search(
                 scope_id,
                 query,
