@@ -48,18 +48,21 @@ export COACH_DATA_DIR="$HOME/.recall-coach"
 ```
 === 后端：seekdb / embedded｜embedding builtin-hash-1024｜记忆 在线
 [PASS] status 返回后端信息
-[PASS] 载入样例资料 | materials=9 reviews=0
-[PASS] seekdb 混合检索有结果 | hit0=死锁的四个必要条件
+[PASS] 载入样例资料 | materials=9 reviews≥10
+[PASS] seekdb 混合检索有结果 | hit0=进程与线程
 [PASS] 创建复习 session | cards=3
-[PASS] 评分并更新掌握度 | verdict=again answer=进程 mastery=0.0
+[PASS] 评分并更新掌握度 | verdict=again answer=不可剥夺 mastery=0.0
 [PASS] seekdb 相关原文回显 | related=2
+--- 记忆写入：《操作系统》死锁的四个必要条件：概念「不可剥夺」还没记牢（复习第 6 次仍然答错）。
 [PASS] PowerContext 写入学习记忆
-[PASS] 记忆快照可读 | active=1 preference=False
+[PASS] 记忆快照可读 | active=5 preference=True
 [PASS] 保存讲解偏好 | 讲解偏好：先给反例，再给结论
 [PASS] seekdb 执行记录可核对 | rows=10
-[PASS] PowerContext 读写记录可核对 | rows=8
+[PASS] PowerContext 读写记录可核对 | rows=10
 === 11/11 步通过
 ```
+
+`active=5` 是「4 条薄弱点 + 1 条偏好」；同一条薄弱点重复答错时先**失效旧条目**再写新条目，所以计数不会随复习次数增长。
 
 ## 3. 手动核对 seekdb（检索结果如何进入流程）
 
@@ -78,11 +81,14 @@ export COACH_DATA_DIR="$HOME/.recall-coach"
    - `/api/evidence?channel=powercontext` 里出现 `POST /v1/memory/remember`，请求体含 `kind=weakness`；
 2. 第二次复习（同一课程）：`/api/session` 响应里的 `context` 字段非空，且包含上一轮的薄弱点文本；
    - 对应的 `POST /v1/context/prepare` 请求/响应同样在证据栏；
-3. 在右侧「学习记忆」点「修正」或「失效」：
-   - 分别命中 `POST /v1/memory/revise`、`POST /v1/memory/retire`，随后 `/api/memory` 重新拉取快照；
-4. 保存一次讲解偏好，新开会话时 `context/prepare` 返回的偏好条目应包含它。
+3. 在右侧「学习记忆」点「修正」：先对旧条目调用 `POST /v1/atomic-memory/lifecycle`（`state=forgotten`），
+   再 `POST /v1/memory/remember` 写入修正后的文字；点「失效」只发 lifecycle（`state=forgotten`）；
+   - 两条请求都出现在证据栏，`/api/memory` 重新拉取快照后旧条目从面板消失，历史仍可在 PowerContext 侧审计；
+4. 保存一次讲解偏好：新偏好会先让旧的 preference 失效再写入，因此面板里始终只有一条生效偏好；
+5. 再开一次会话，`context/prepare` 返回的偏好条目应包含刚保存的那条。
 
-**预期**：`/api/memory` 的 `entries` 中能看到 `weakness/preference/progress`，且每条都有 `citation` 可追溯。
+**预期**：`/api/memory` 的 `entries` 中能看到 `weakness/preference/progress`，每条都带
+`artifact`（`artifact_id` + `revision`）与 `state_version`，可追溯；同一条笔记的薄弱点始终只有一条 `active` 记录。
 
 ## 5. Windows（无 seekdb 运行时的降级路径）
 
@@ -94,8 +100,7 @@ py -3.12 -m venv .venv
 ```
 
 - `backend.backend == "sqlite-mirror"`：SQLite + 纯 Python 余弦 + 字符 n-gram 词法分，契约与 seekdb 后端一致；
-- 未安装 `powercontext` 时 `memory.available == false`，界面明确提示离线；
-- 同一 `smoke.py` 在 Windows 下应为 `7/7 步通过，3 步跳过（仅记忆面板）`。
+- `powercontext[server,client]` 在 Windows 上同样可用，`memory.available == true`，完整 11 步也能通过；只有主动不装 `powercontext` 时才降级为「记忆离线」（`7/7 步通过，3 步跳过`）。
 
 ## 6. 常见问题
 

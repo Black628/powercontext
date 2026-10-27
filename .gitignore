@@ -3,3 +3,8 @@
 qoder/data/
 .scratch/
 
+
+__pycache__/
+*.pyc
+.env
+

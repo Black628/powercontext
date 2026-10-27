@@ -179,29 +179,51 @@ class Coach:
         return len(weak_tokens & material_tokens) / max(1, min(len(weak_tokens), len(material_tokens)))
 
     async def _read_memory(self, course: str | None) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str]:
-        """Ask PowerContext what it remembers before the deck is built."""
+        """Ask PowerContext what it remembers before the deck is built.
+
+        The entries list is the authoritative source: memory search ranks by
+        relevance to a short query, while the learner's recorded weak spots are
+        exactly the rows that should reorder the deck. Search results are added
+        as extra hints when they say something new.
+        """
         if not self.memory.available:
             return None, [], ""
-        focus = f"复习《{course}》时应该注意什么" if course else "这一轮复习应该注意什么"
+        focus = f"{course or ''} 还没记牢 薄弱点 概念 复习".strip()
         prepared: dict[str, Any] | None = None
-        hits: list[dict[str, Any]] = []
+        hints: list[dict[str, Any]] = []
+        preference = ""
         try:
             prepared = await self.memory.prepare(focus)
         except MemoryUnavailable:
             LOGGER.warning("context/prepare failed; continuing without prepared context")
         try:
-            hits = await self.memory.search(f"薄弱点 {course or ''}", limit=8)
-        except MemoryUnavailable:
-            LOGGER.warning("memory/search failed; continuing without memory hints")
-        preference = ""
-        try:
             entries = await self.memory.entries()
-            for entry in entries:
-                if entry.get("kind") == "preference" and entry.get("state") == "active":
-                    preference = str(entry.get("text") or "")
         except MemoryUnavailable:
+            entries = []
             LOGGER.warning("memory/entries/list failed; preference stays empty")
-        return prepared, hits, preference
+        for entry in entries:
+            if entry.get("state") != "active":
+                continue
+            kind = str(entry.get("kind") or "")
+            text = str(entry.get("text") or "")
+            if not text:
+                continue
+            if kind == "preference":
+                preference = text
+            elif kind in ("weakness", "misconception"):
+                hints.append({"text": text, "kind": kind})
+        try:
+            hints.extend(await self.memory.search(focus, limit=6))
+        except MemoryUnavailable:
+            LOGGER.warning("memory/search failed; continuing without search hints")
+        seen: set[str] = set()
+        unique: list[dict[str, Any]] = []
+        for hint in hints:
+            text = str(hint.get("text") or "")
+            if text and text not in seen:
+                seen.add(text)
+                unique.append(hint)
+        return prepared, unique[:8], preference
 
     # -- session start -------------------------------------------------------
     async def start_session(self, course: str | None = None, budget: int = 8) -> dict[str, Any]:
@@ -224,9 +246,13 @@ class Coach:
         deck = (due or candidates)[: max(1, min(int(budget), 12))]
 
         distractors = self._distractor_pool(materials)
+        pools: dict[str, list[str]] = {}
+        for item in materials:
+            pools.setdefault(str(item["course"]), []).extend(item.get("keywords") or [])
         cards: list[dict[str, Any]] = []
         for material in deck:
-            card = self._build_card(material, distractors)
+            pool = pools.get(str(material["course"])) or distractors
+            card = self._build_card(material, pool)
             related, trace = await asyncio.to_thread(self.store.hybrid_search, card["prompt"], material["course"], 3)
             card["related"] = [
                 {
@@ -315,11 +341,19 @@ class Coach:
         if self.memory.available:
             try:
                 if verdict == "again":
+                    text = (
+                        f"《{material['course']}》{material['title']}：概念「{card['answer']}」还没记牢"
+                        f"（复习第 {reviews} 次仍然答错）。"
+                    )
+                    # One weak-spot row per note: forget every stale wording so the
+                    # panel and the prepared context do not accumulate duplicates.
+                    stale = await self._weaknesses_for(material)
+                    for entry in stale:
+                        await self.memory.forget(entry["artifact"], int(entry.get("state_version") or 0))
                     memory_write = await self.memory.remember(
                         "weakness",
-                        f"《{material['course']}》{material['title']}：概念「{card['answer']}」还没记牢"
-                        f"（复习第 {reviews} 次仍然答错）。",
-                        reason="复习卡片答错时自动记录薄弱点",
+                        text,
+                        reason="复习卡片再次答错时刷新薄弱点" if stale else "复习卡片答错时自动记录薄弱点",
                     )
                 elif verdict == "correct" and reviews % 3 == 0:
                     memory_write = await self.memory.remember(
@@ -348,6 +382,20 @@ class Coach:
         }
 
     # -- card construction ---------------------------------------------------
+    async def _weaknesses_for(self, material: dict[str, Any]) -> list[dict[str, Any]]:
+        marker = f"《{material['course']}》{material['title']}："
+        try:
+            entries = await self.memory.entries()
+        except MemoryUnavailable:
+            return []
+        return [
+            entry
+            for entry in entries
+            if entry.get("kind") == "weakness"
+            and entry.get("state") == "active"
+            and marker in str(entry.get("text") or "")
+        ]
+
     @staticmethod
     def _distractor_pool(materials: list[dict[str, Any]]) -> list[str]:
         pool: list[str] = []
@@ -357,15 +405,54 @@ class Coach:
                     pool.append(word)
         return pool
 
+    # Function words that make a keyword phrase a poor fill-in answer or option.
+    _STOP_WORDS = (
+        "的", "了", "是", "它", "这", "那", "我", "你", "他", "她", "们", "也", "就",
+        "在", "把", "被", "给", "对", "与", "及", "或", "而", "但", "能", "会", "要",
+        "可以", "一个", "什么", "怎么", "如果", "因为", "所以", "因此", "通过", "能够",
+        "已经", "还是", "不是", "没有", "就是", "都是", "其中", "并且", "而且", "由于",
+        "根据", "例如", "包括", "需要", "应该", "可能", "一定", "非常", "比较", "更加",
+        "几乎", "大约", "说明", "表示", "认为", "进行", "以及", "之间", "之后", "之前",
+    )
+
+    @classmethod
+    def _term_like(cls, word: str, body: str) -> bool:
+        return (
+            2 <= len(word) <= 12
+            and word in body
+            and not any(stop in word for stop in cls._STOP_WORDS)
+            and not word.endswith(("的", "了", "是", "在", "和", "与", "或"))
+        )
+
+    @classmethod
+    def _answer_candidates(cls, material: dict[str, Any], body: str) -> list[str]:
+        words = [word for word in (material.get("keywords") or []) if cls._term_like(word, body)]
+        # Prefer terms that occur exactly once: a blank with one occurrence has
+        # exactly one answer, so the card cannot be ambiguous.
+        words.sort(key=lambda word: (body.count(word) != 1, -len(word)))
+        return words
+
+    @staticmethod
+    def _window(marked: str, limit: int = 300) -> str:
+        """Trim long notes around the blank so the card stays readable."""
+        if len(marked) <= limit:
+            return marked
+        blank = marked.find("____")
+        if blank < 0:
+            return marked[:limit] + "…"
+        start = max(0, blank - limit // 2)
+        end = min(len(marked), start + limit)
+        return ("…" if start else "") + marked[start:end] + ("…" if end < len(marked) else "")
+
     def _build_card(self, material: dict[str, Any], pool: list[str]) -> dict[str, Any]:
         body = squeeze(material["body"])
-        candidates = [word for word in (material.get("keywords") or []) if word in body and 2 <= len(word) <= 12]
+        candidates = self._answer_candidates(material, body)
         answer = candidates[0] if candidates else ""
         if answer:
-            prompt = body.replace(answer, "____", 1)
+            prompt = self._window(body.replace(answer, "____", 1))
             question = f"补全《{material['course']}》笔记中的空缺："
         else:
-            prompt = body
+            prompt = self._window(body)
             question = f"用自己的话复述《{material['course']}》这条笔记的核心结论："
             answer = squeeze(material["title"])
 
@@ -373,7 +460,7 @@ class Coach:
         for word in pool:
             if len(options) >= 4:
                 break
-            if word == answer or word in options:
+            if word == answer or word in options or not self._term_like(word, body):
                 continue
             if abs(len(word) - len(answer)) <= 3 and not re.search(r"[\s]", word):
                 options.append(word)
@@ -404,13 +491,22 @@ class Coach:
             raise ValueError("偏好内容为空")
         if not self.memory.available:
             raise MemoryUnavailable("PowerContext 不可用，无法保存偏好")
+        # Keep a single active preference: forget the previous wording so the
+        # panel and the prepared context do not accumulate near-duplicates.
+        try:
+            for entry in await self.memory.entries():
+                if entry.get("kind") == "preference" and entry.get("state") == "active":
+                    await self.memory.forget(entry["artifact"], int(entry.get("state_version") or 0))
+        except MemoryUnavailable:
+            LOGGER.warning("could not retire previous preference; writing the new one anyway")
         return await self.memory.remember("preference", f"讲解偏好：{text}", reason="学习者在设置里显式保存")
 
-    async def revise_entry(self, citation: dict[str, Any], kind: str, text: str) -> dict[str, Any]:
-        return await self.memory.revise(citation, kind, text)
+    async def revise_entry(self, artifact: dict[str, Any], state_version: int, kind: str, text: str) -> dict[str, Any]:
+        await self.memory.forget(artifact, state_version)
+        return await self.memory.remember(kind, text, reason="学习者在记忆面板中修正")
 
-    async def retire_entry(self, citation: dict[str, Any], reason: str) -> dict[str, Any]:
-        return await self.memory.retire(citation, reason)
+    async def retire_entry(self, artifact: dict[str, Any], state_version: int, reason: str) -> dict[str, Any]:
+        return await self.memory.forget(artifact, state_version)
 
     async def memory_snapshot(self) -> dict[str, Any]:
         if not self.memory.available:

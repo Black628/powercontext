@@ -281,7 +281,24 @@ class LearnerMemory:
         payload = {"scope_id": scope_id, "kind": kind, "text": squeeze(text)[:4000]}
         if reason:
             payload["reason"] = squeeze(reason)[:400]
-        return await self._call("POST", "/v1/memory/remember", payload)
+        result = await self._call("POST", "/v1/memory/remember", payload)
+        records = result.get("records") if isinstance(result, dict) else None
+        if records:
+            record = records[0]
+            # Flatten the Atomic Memory record so callers (smoke, UI) can show the
+            # confirmed entry text without knowing the lifecycle envelope.
+            entry = {key: record[key] for key in ("kind", "text", "state", "artifact", "state_version") if key in record}
+            result = {**result, "entry": entry}
+        return result
+
+    async def forget(self, artifact: dict[str, Any], state_version: int) -> dict[str, Any]:
+        """Retire one Atomic Memory entry (PowerContext 1.4.x lifecycle API)."""
+        scope_id = await self.ensure_scope()
+        return await self._call(
+            "POST",
+            "/v1/atomic-memory/lifecycle",
+            {"scope_id": scope_id, "target": {"artifact": artifact, "state_version": int(state_version)}, "state": "forgotten"},
+        )
 
     async def search(self, query: str, limit: int = 6) -> list[dict[str, Any]]:
         scope_id = await self.ensure_scope()

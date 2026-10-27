@@ -73,13 +73,15 @@ class PreferenceIn(BaseModel):
 
 
 class ReviseIn(BaseModel):
-    citation: dict[str, Any]
+    artifact: dict[str, Any]
+    state_version: int = Field(default=0, ge=0)
     kind: str = Field(min_length=1, max_length=64)
     text: str = Field(min_length=1, max_length=4000)
 
 
 class RetireIn(BaseModel):
-    citation: dict[str, Any]
+    artifact: dict[str, Any]
+    state_version: int = Field(default=0, ge=0)
     reason: str = Field(default="学习者在记忆面板中标记失效", max_length=400)
 
 
@@ -229,7 +231,7 @@ async def set_preference(payload: PreferenceIn) -> dict[str, Any]:
 async def revise_memory(payload: ReviseIn) -> dict[str, Any]:
     coach = coach_of()
     try:
-        result = await coach.revise_entry(payload.citation, payload.kind, payload.text)
+        result = await coach.revise_entry(payload.artifact, payload.state_version, payload.kind, payload.text)
     except MemoryUnavailable as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     return {"ok": True, "written": result, "memory": await coach.memory_snapshot()}
@@ -239,7 +241,7 @@ async def revise_memory(payload: ReviseIn) -> dict[str, Any]:
 async def retire_memory(payload: RetireIn) -> dict[str, Any]:
     coach = coach_of()
     try:
-        result = await coach.retire_entry(payload.citation, payload.reason)
+        result = await coach.retire_entry(payload.artifact, payload.state_version, payload.reason)
     except MemoryUnavailable as error:
         raise HTTPException(status_code=503, detail=str(error)) from error
     return {"ok": True, "written": result, "memory": await coach.memory_snapshot()}

@@ -25,7 +25,7 @@
 | 技术 | 在本项目里的职责 | 可以怎么核对 |
 | --- | --- | --- |
 | **seekdb**（向量 + 全文混合检索） | 学习资料的唯一存储与检索底座：`coach_materials` 表带 `VECTOR(1024)` 列和 HNSW 索引，检索时向量通道 `ORDER BY l2_distance(...) APPROXIMATE` 与全文通道 `MATCH(search_text) AGAINST(...)` 各自取候选，再用 RRF 融合；每次作答的评估也回写掌握度、复习次数 | 界面「执行记录 → seekdb」逐条显示 SQL、参数、行数、耗时；`/api/evidence` 返回同样内容；`/api/search` 返回两通道名次 |
-| **PowerContext**（记忆与上下文） | 学习者侧的持久记忆：薄弱点（weakness）、常见误区（misconception）、偏好（preference）、进度（progress）；`memory/remember` 写入、`memory/search` 召回、`context/prepare` 组装下一轮上下文、`memory/entries/list` 渲染记忆面板、`memory/revise`/`memory/retire` 修正与失效 | 界面「执行记录 → PowerContext」逐条显示 HTTP 方法、路径、请求、响应、耗时；「PowerContext 记得的你」直接展示 `context/prepare` 返回的上下文文本 |
+| **PowerContext**（记忆与上下文） | 学习者侧的持久记忆：薄弱点（weakness）、常见误区（misconception）、偏好（preference）、进度（progress）；`memory/remember` 写入、`memory/search` 召回、`context/prepare` 组装下一轮上下文、`memory/entries/list` 渲染记忆面板；「修正」= 先 `atomic-memory/lifecycle` 失效旧条目再写新条目，「失效」= 标记 `forgotten`（PowerContext 1.4.x Atomic Memory API），历史仍可审计 | 界面「执行记录 → PowerContext」逐条显示 HTTP 方法、路径、请求、响应、耗时；「PowerContext 记得的你」直接展示 `context/prepare` 返回的上下文文本 |
 
 两者不互相替代：**检索结果只有在学习者作答之后才可能变成记忆**，而记忆只用于影响下一轮检索与提示。
 
@@ -60,7 +60,7 @@ py -3.12 -m venv .venv                      # 或复用已有虚拟环境
 .venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8848
 ```
 
-打开 <http://127.0.0.1:8848>，首次打开会自动载入示例资料。此时后端为 `sqlite-mirror`，记忆为「离线」——这是刻意的降级，便于评委在没有 Linux 环境的机器上先看闭环。
+打开 <http://127.0.0.1:8848>，首次打开会自动载入示例资料。此时检索后端为 `sqlite-mirror`（没有 seekdb 运行时），但 `powercontext[server,client]` 在 Windows 上同样可用，记忆为「在线」，完整 11 步验证也能跑通；只有主动不装 `powercontext` 时才降级为「记忆离线」（7 步通过 + 3 步跳过）。
 
 ### 5.2 Linux / macOS（主通道：seekdb 嵌入式 + PowerContext 嵌入式）
 
@@ -128,15 +128,15 @@ cd qoder
 6. `/api/memory` 读取记忆快照，写入一条讲解偏好；
 7. `/api/evidence` 核对 seekdb 执行记录与 PowerContext 读写记录。
 
-在无 seekdb/无 PowerContext 的 Windows 环境，记忆相关 3 步会显示 `[SKIP]`，其余步骤应全部 `[PASS]`；在 Linux 主通道下应全部 `[PASS]`。
+在 Windows 镜像模式（无 seekdb 运行时）下，同一脚本仍为 `11/11` 通过（`backend=sqlite-mirror`、`memory=embedded`）；只有未安装 `powercontext` 时，记忆相关 3 步才显示 `[SKIP]`，其余 7 步全部 `[PASS]`。Linux 主通道为 `seekdb/embedded` + `memory online`。
 
 ### 6.2 手工路径（界面）
 
 1. 首页「资料库」确认已有 4 门课程、9 段资料；
 2. 「开始复习」选择「操作系统」，3 张卡；
-3. 顶部出现「PowerContext 记得的你」（主通道下为真实上下文；镜像模式显示离线提示）；
+3. 顶部出现「PowerContext 记得的你」（嵌入/外部 PowerContext 下为真实上下文；未安装时为离线提示）；
 4. 第一张卡故意选错 → 出现正确答案、掌握度、seekdb 相关原文；
-5. 右栏「学习记忆」出现一条 weakness 记录，可点「修正」「失效」；
+5. 右栏「学习记忆」出现一条 weakness 记录，可点「修正」（失效旧条目并写新内容）或「失效」；
 6. 展开「执行记录」，可逐条看到 `l2_distance ... APPROXIMATE` 与 `MATCH ... AGAINST` 的 SQL，以及 `POST /v1/memory/remember` 的请求与响应；
 7. 再开一轮，顶部上下文应出现上一轮的薄弱点，且该知识点优先出现。
 
@@ -145,33 +145,45 @@ cd qoder
 ```
 === 后端：seekdb / embedded｜embedding builtin-hash-1024｜记忆 在线
 [PASS] status 返回后端信息
-[PASS] 载入样例资料 | materials=9 reviews=2
-[PASS] seekdb 混合检索有结果 | hit0=死锁的四个必要条件
+[PASS] 载入样例资料 | materials=9 reviews≥10
+[PASS] seekdb 混合检索有结果 | hit0=进程与线程
 [PASS] 创建复习 session | cards=3
---- PowerContext 上下文（798 字节）
-    ...BEGIN_POWERCONTEXT_PREPARED_CONTEXT_V1{"trust":"untrusted_history","items":[...
-[PASS] 评分并更新掌握度 | verdict=again answer=进程 mastery=0.0
+--- PowerContext 上下文（1504 字节）
+    ...BEGIN_POWERCONTEXT_PREPARED_CONTEXT_V1 ...已注入 4 条薄弱点 + 1 条偏好...
+[PASS] 评分并更新掌握度 | verdict=again answer=不可剥夺 mastery=0.0
 [PASS] seekdb 相关原文回显 | related=2
---- 记忆写入：(仅内存状态)
+--- 记忆写入：《操作系统》死锁的四个必要条件：概念「不可剥夺」还没记牢（复习第 6 次仍然答错）。
 [PASS] PowerContext 写入学习记忆
-[PASS] 记忆快照可读 | active=6 preference=True
+[PASS] 记忆快照可读 | active=5 preference=True
 [PASS] 保存讲解偏好 | 讲解偏好：先给反例，再给结论
 [PASS] seekdb 执行记录可核对 | rows=10
-[PASS] PowerContext 读写记录可核对 | rows=8
+[PASS] PowerContext 读写记录可核对 | rows=10
 
 === 11/11 步通过
 ```
 
-镜像模式下同一脚本的输出（Windows，实测）：
+镜像模式下同一脚本的输出（Windows，实测，本机已装 `powercontext`）：
 
 ```
-=== 后端：sqlite-mirror / sqlite｜embedding builtin-hash-1024｜记忆 离线
-[PASS] ...（检索闭环 7 步全部通过）
-[SKIP] 记忆快照 / 保存讲解偏好 / PowerContext 读写记录（未安装 powercontext）
-=== 7/7 步通过，3 步跳过（仅记忆面板）
+=== 后端：sqlite-mirror / sqlite｜embedding builtin-hash-1024｜记忆 在线
+[PASS] ...（前进 11 步全部通过，后端徽章显示「SQLite 镜像」）
+=== 11/11 步通过
 ```
+
+如果刻意不安装 `powercontext`，则记忆相关 3 步显示 `[SKIP]`，结果为 `7/7 步通过，3 步跳过（仅记忆面板）`。
 
 真实输出会随作答内容变化；行数、上下文字节数以本机实际为准。空库首次运行时 `context/prepare` 还没有记忆可拼，上下文字节数为 0、`active=1`（脚本写入的第一条），第二轮起上下文就会带上上一轮的薄弱点。
+
+### 6.4 界面截图（WSL seekdb 主通道实测）
+
+| 截图 | 说明 |
+| --- | --- |
+| [`docs/screenshots/01-home.png`](docs/screenshots/01-home.png) | 首页：4 门课程 9 段资料、复习会话入口、PowerContext 记忆面板与 seekdb 执行记录 |
+| [`docs/screenshots/02-session.png`](docs/screenshots/02-session.png) | 开始一轮复习：卡片由混合检索召回，顶部显示本轮 PowerContext 上下文 |
+| [`docs/screenshots/03-graded.png`](docs/screenshots/03-graded.png) | 作答后：正确答案、掌握度、seekdb 相关原文回显、已写入 PowerContext 的薄弱点文本 |
+| [`docs/screenshots/04-memory.png`](docs/screenshots/04-memory.png) | 记忆面板：薄弱点/偏好可「修正」「失效」，右侧可见真实 SQL 与记忆读写记录 |
+
+截图由 CDP 驱动无头 Edge 在 1500×1150 视口下抓取，页面与数据都来自同一套 `app/` 代码。
 
 ## 7. 配置项
 
@@ -204,8 +216,8 @@ cd qoder
 | POST | `/api/session/{id}/grade` | 作答评分、写记忆、回显相关原文 |
 | GET | `/api/memory` | 记忆快照（含偏好与上下文预览） |
 | POST | `/api/memory/preference` | 保存讲解偏好 |
-| POST | `/api/memory/revise` | 修正一条记忆 |
-| POST | `/api/memory/retire` | 失效一条记忆 |
+| POST | `/api/memory/revise` | 修正一条记忆（失效旧条目 + 写入新条目） |
+| POST | `/api/memory/retire` | 失效一条记忆（lifecycle `state=forgotten`） |
 | GET | `/api/evidence` | seekdb SQL 与 PowerContext HTTP 记录 |
 
 ## 9. 目录结构
@@ -246,7 +258,7 @@ qoder/
 ## 11. 已知边界
 
 - **Windows 没有 seekdb 运行时**：`pylibseekdb` 只提供 Linux/macOS wheel，因此 Windows 上走 SQLite 镜像后端；功能与界面一致，但 SQL 会标注为镜像实现。
-- **PowerContext 需要 Python 服务端**：Windows 未安装 `powercontext` 时记忆离线，属于设计内的降级；主通道（Linux/macOS/WSL）为在线。
+- **PowerContext 需要 Python 服务端**：Windows 上 `pip install 'powercontext[server,client]' pymysql` 后可复用嵌入式 Server（本机实测 11/11）；未安装时记忆离线，属于设计内的降级。
 - **内置 hash 向量是演示级语义近似**：它依赖字面重合，适合零配置复现；要获得真实语义检索，按 5.5 配置 embedding 模型。
 - 单机演示，无用户体系；`scope` 按学习者一人一份，导游 `COACH_PC_SCOPE_ID` 可复用既有 scope。
 
