@@ -26,6 +26,8 @@ from pathlib import Path
 from time import perf_counter
 from typing import TYPE_CHECKING, Any, Protocol
 
+from powercontext.builtin.runtime.context_pack import ContextPack, ContextPackDelta
+
 from pydantic import BaseModel, JsonValue, ValidationError
 
 from powercontext._logging import log_safely
@@ -847,6 +849,49 @@ class ScopedContextApplication:
                 await authorize_scopes((self.scope_id, *scope.context_references))
             return await self._prepare(request, scope)
 
+    async def prepare_incremental(
+        self,
+        request: PrepareContextRequest,
+        base_pack: ContextPack | None = None,
+        /,
+        *,
+        authorize_scopes: Callable[[tuple[str, ...]], Awaitable[None]] | None = None,
+        atomic_context: ArtifactSearchExecutionContext | None = None,
+    ) -> ContextPack | ContextPackDelta:
+        # 1. 调用现有的 prepare 获取本轮目标内容
+        prepared_context = await self.prepare(
+            request,
+            authorize_scopes=authorize_scopes,
+            atomic_context=atomic_context
+        )
+        
+        # 2. 尝试从 prepared_context 中提取纯正文（更健壮的写法）
+        content_str = ""
+        if getattr(prepared_context, "status", "") == "empty" or getattr(prepared_context, "content_bytes", 1) == 0:
+            content_str = ""
+        else:
+            if hasattr(prepared_context, "content") and isinstance(prepared_context.content, str):
+                content_str = prepared_context.content
+            elif hasattr(prepared_context, "text") and isinstance(prepared_context.text, str):
+                content_str = prepared_context.text
+            elif hasattr(prepared_context, "sections"):
+                content_str = "".join([sec.content for sec in prepared_context.sections if hasattr(sec, "content")])
+            else:
+                try:
+                    content_str = prepared_context.model_dump_json()
+                except AttributeError:
+                    content_str = str(prepared_context)
+
+        # 3. 构造目标 Pack
+        target_pack = ContextPack.from_content(content_str)
+        
+        # 4. 如果没给 base_pack，说明是首轮，返回完整 Pack
+        if base_pack is None:
+            return target_pack
+            
+        # 5. 如果有 base_pack，生成并返回 Delta
+        return ContextPackDelta.between(base_pack, target_pack)
+    
     async def _prepare(self, request: PrepareContextRequest, scope: ScopeDescriptor, /) -> PreparedContext:
         build, effort = await self._prepare_build(request, scope)
         if effort is not None and self._runtime._recall_effort_sink is not None:
