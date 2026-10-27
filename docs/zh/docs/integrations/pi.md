@@ -45,6 +45,75 @@ Scope 时设置显式变量。
 
 启用这些能力后，Pi 已满足仓库定义的 Full 核心接入 profile。
 
+## 导入离线会话分支
+
+Python 模块 `powercontext.sources.pi_session` 可从 Pi v3 JSONL 文件采集原始历史。这是显式的离线采集入口；
+安装 Pi package 不会自动启动完整会话采集。
+
+传入完整 UTF-8 字节内容，可带文件开头的 UTF-8 BOM。不传 `leaf_id` 时选择文件中的最后一个节点：
+
+```python
+from powercontext.sources import SourceDefinitionRegistry
+from powercontext.sources.pi_session import (
+    PI_EVENT_SOURCE_DEFINITION,
+    PiSessionInput,
+    parse_pi_session,
+)
+from powercontext.sources.projections import TEXT_EVIDENCE_PROJECTION_KEY
+
+
+async def inspect_history(content: bytes, leaf_id: str | None = None):
+    events = parse_pi_session(PiSessionInput(content=content, leaf_id=leaf_id))
+    registry = SourceDefinitionRegistry((PI_EVENT_SOURCE_DEFINITION,))
+    sources = [await registry.resolve(event) for event in events]
+    return tuple(registry.project(source, TEXT_EVIDENCE_PROJECTION_KEY) for source in sources)
+```
+
+解析器先验证完整文件，再返回事件。首条记录必须是 v3 session header；其余节点 ID 唯一，且显式提供 `parentId`，
+值为 null 或之前出现的节点 ID。编码、JSON、图连接不合法或指定 leaf 不存在时，均抛出 `ValueError`，不返回部分结果。
+控制节点保留图上的连接关系，但不生成文本证据。返回事件沿完整根到叶路径排列；压缩、分支摘要和上下文编辑不会删除此前的原始证据。
+
+text 块保留原字符串，并以换行连接。工具调用格式为 `[tool_call NAME ID] COMPACT_SORTED_JSON_ARGUMENTS`，
+工具结果格式为 `[tool_result NAME ID] TEXT`。Bash 消息保留 `$ COMMAND`、换行和完整输出。摘要与 custom message
+保留可见文本。thinking、图片、system message 和控制节点不进入文本投影。每个可见事件仍保存完整原始 `record`；
+采集过程不会执行记录里的工具参数或命令。
+
+每个事件形成定义版本为 `1` 的 captured `pi-event` Source。其名称由 `pi:` 加上紧凑 Unicode JSON 数组
+`[session_id,event_id]` 的 SHA-256 构成，共 67 个字符；身份只取决于两个原始 ID，保留其中有意义的空白。
+`registry.read(source)` 返回完整 `PiEventInput`。标准 `powercontext.text-evidence/1` 投影保留完整 `ROLE: BODY`
+正文，以及 `session_id`、`event_id`、`parent_id`、`event_type`、`role` 五个 metadata 键。
+Source 不会为了适配 Memory 单条限制而截断。配置好的 Memory pipeline 可拆分自己的条目并引用完整 Source，
+检索命中仍可通过精确 `MemoryCitation` 回查。
+
+增量采集使用现有 `ConnectorLifecycle`，为其提供对接 Runtime 的 Source sink 和持久化 checkpoint store。
+提交 observation 前先通过 manifest 注册 `PI_EVENT_SOURCE_DEFINITION`。已持有该 lifecycle 的应用可这样运行：
+
+```python
+from powercontext.sources import ConnectorBinding
+from powercontext.sources.connectors import ConnectorLifecycle
+from powercontext.sources.pi_session import PiSessionConnector
+
+
+async def collect_history(lifecycle: ConnectorLifecycle, scope_id: str, path: str, leaf_id: str | None = None):
+    connector = PiSessionConnector(path, leaf_id)
+    binding = ConnectorBinding(
+        scope_id=scope_id,
+        binding_id="pi-session-history",
+        connector_name=connector.name,
+        connector_version=connector.version,
+    )
+    return await lifecycle.run(connector, binding)
+```
+
+多次运行和切换分支时保持同一 binding；不同 session 使用不同 binding。共享祖先只提交一次，另一分支已采集的证据仍然保留。
+仅在 observation 成功持久化后，lifecycle 才推进 checkpoint。提交被拒绝、抛出异常或输入损坏时，已提交进度保持不变；
+重试会安全去重此前已接受的 Source。
+
+每次运行都会完整读取并验证文件，再校验所有已导入事件的原始记录摘要，包括当前未选中的分支。
+已导入事件被改写或移除时抛出 `ValueError`，修复文件后再重试。应保留原 session ID 和已采集记录。
+checkpoint 随累计已导入的可见事件数量增长，保存事件 ID 和记录摘要，不重复保存完整工具结果。
+进度由 lifecycle 持久化，因此新建 Connector 或重启进程后仍可继续采集。
+
 ## 控制提示词采集
 
 默认开启提示词采集。当前工作不应被记录时，请在启动 Pi 前关闭：

@@ -46,6 +46,81 @@ Scope ID. Keep the explicit variable unset unless the host must force one existi
 
 With these capabilities enabled, Pi satisfies the repository's Full core integration profile.
 
+## Import an offline session branch
+
+The Python `powercontext.sources.pi_session` module captures raw history from a Pi v3 JSONL archive. This is an
+explicit offline collection path; installing the Pi package does not start transcript collection.
+
+Parse complete UTF-8 bytes, optionally with a UTF-8 BOM. Omitting `leaf_id` selects the last node in the file:
+
+```python
+from powercontext.sources import SourceDefinitionRegistry
+from powercontext.sources.pi_session import (
+    PI_EVENT_SOURCE_DEFINITION,
+    PiSessionInput,
+    parse_pi_session,
+)
+from powercontext.sources.projections import TEXT_EVIDENCE_PROJECTION_KEY
+
+
+async def inspect_history(content: bytes, leaf_id: str | None = None):
+    events = parse_pi_session(PiSessionInput(content=content, leaf_id=leaf_id))
+    registry = SourceDefinitionRegistry((PI_EVENT_SOURCE_DEFINITION,))
+    sources = [await registry.resolve(event) for event in events]
+    return tuple(registry.project(source, TEXT_EVIDENCE_PROJECTION_KEY) for source in sources)
+```
+
+The parser validates the entire archive before returning events. The header must identify a version 3 session;
+nodes need unique IDs and an explicit `parentId` that is null or names an earlier node. Invalid encoding, JSON,
+graph links, or a missing selected leaf raise `ValueError`, with no partial result. Control nodes connect the graph
+without becoming text evidence. Returned events follow the complete root-to-leaf path: compaction, branch summaries,
+and context edits do not remove earlier raw evidence.
+
+Text blocks preserve their original strings and join with newlines. Tool calls use
+`[tool_call NAME ID] COMPACT_SORTED_JSON_ARGUMENTS`; tool results use `[tool_result NAME ID] TEXT`. Bash messages retain
+`$ COMMAND` followed by a newline and the output. Summaries and custom messages retain their visible text. Thinking,
+images, system messages, and control nodes are excluded from text projections. Each visible event still retains its
+complete original `record`; neither tool arguments nor recorded commands are executed.
+
+Each event is a captured `pi-event` Source, definition version `1`. Its 67-character name is `pi:` plus the SHA-256 of
+the compact Unicode JSON pair `[session_id,event_id]`. It depends only on those exact IDs, including significant
+whitespace. `registry.read(source)` returns the complete `PiEventInput`. The standard `powercontext.text-evidence/1`
+projection keeps the full `ROLE: BODY` text and metadata keys `session_id`, `event_id`, `parent_id`, `event_type`, and
+`role`. Source text is never shortened to fit a Memory entry. A configured Memory pipeline can split its own entries
+and preserve references to the full Source; search hits retain exact `MemoryCitation` lookup.
+
+Use the existing `ConnectorLifecycle` with a Runtime-backed Source sink and persistent checkpoint store to collect
+incrementally. Register `PI_EVENT_SOURCE_DEFINITION` through its manifest before submitting observations. For example,
+an application that already owns this lifecycle can run:
+
+```python
+from powercontext.sources import ConnectorBinding
+from powercontext.sources.connectors import ConnectorLifecycle
+from powercontext.sources.pi_session import PiSessionConnector
+
+
+async def collect_history(lifecycle: ConnectorLifecycle, scope_id: str, path: str, leaf_id: str | None = None):
+    connector = PiSessionConnector(path, leaf_id)
+    binding = ConnectorBinding(
+        scope_id=scope_id,
+        binding_id="pi-session-history",
+        connector_name=connector.name,
+        connector_version=connector.version,
+    )
+    return await lifecycle.run(connector, binding)
+```
+
+Keep the binding stable across runs and branch selections, and use a separate binding for each session. Shared
+ancestors are submitted once; switching branches retains previously captured evidence. The lifecycle advances its
+checkpoint only after accepted observations are durable. A rejected submission, exception, or malformed input leaves
+the committed checkpoint unchanged; retries safely deduplicate already accepted Sources.
+
+Every run reads and validates the complete file, then checks the original-record digests of all previously imported
+events, including unselected branches. Rewriting or removing an imported event raises `ValueError`; restore the
+archive before retrying. Keep the original session ID and imported records available. The checkpoint grows with the
+number of imported visible events and stores their IDs and record digests rather than full tool results. It is
+persisted by the lifecycle, so creating a new Connector or restarting the process preserves collection progress.
+
 ## Control prompt capture
 
 Prompt capture is enabled by default. Disable it before starting Pi when current work must not be recorded:
