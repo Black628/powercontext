@@ -70,3 +70,40 @@ make -C competition test-pdf
 
 Additional behavior tests live in `tests/test_pdf_pages.py` and
 `tests/e2e/test_pdf_page_retrieval.py`.
+
+## Public quality validation
+
+The implementation at commit `63e069d46672c9e6e4d1d17f544ad54d4b0c3d37` was
+evaluated on 2026-10-27 against the complete public PDF and all five published
+questions. The reference was restricted to those questions' eight evidence
+annotations, covering six distinct physical pages, from
+[FinanceBench's fixed public dataset](https://github.com/patronus-ai/financebench/blob/cc39aeb4afdf33909ee1412188bf89035950c2eb/data/financebench_open_source.jsonl).
+Answers and explanations were excluded. Dataset licensing remains CC BY-NC 4.0;
+the original report retains its respective rights.
+
+Inference used the official offline 1-CPU, 2-GB container with read-only candidate
+sources. Annotation files were not mounted in that container. All 503 pages were
+ingested into real SQLite Runtime; retrieval ran after closing and reopening
+Runtime, and every returned citation was read back through `memory.get`.
+An external scorer compared the frozen candidate's outputs with the references.
+
+Both texts were lowercased and tokenized with `[a-z]+|\d+`. Token overlap used
+multiset counts. Reference page numbers were converted from zero-based numbering
+to 1-based physical pages. Recall@20 summed each question's distinct matching
+document-page pairs and divided by the sum of distinct reference pages.
+
+| Metric | Required | Observed | Status |
+| --- | --- | --- | --- |
+| Per-page token counts against platform frozen counts | 90%–110% | Platform reference unavailable | Not verified |
+| Per-page token counts against independent Poppler extraction | 90%–110% | 503/503 pages within range | Cross-check passed; not the platform reference |
+| Token counts against annotated full-page text | 90%–110% | 6/6 pages within range; ratios 1.0000–1.0139 | Annotated pages passed |
+| Evidence-token recall | ≥0.95 per annotation | Minimum 0.9962121212; all 8 annotations passed | Public split passed |
+| Annotated full-page token F1 | ≥0.95 per page | Minimum 0.9793459552; all 8 annotation comparisons passed | Public split passed |
+| Evidence-page Recall@20 | ≥0.70 for the split | 7/8 = 0.875 | Public split passed |
+
+The independent full-document reference used Poppler `pdftotext 25.02.0` with
+`-layout -enc UTF-8`. It cannot establish agreement with the platform's undistributed
+frozen counts. Question `financebench_id_01009` retrieved one of its two reference
+pages; the other four questions retrieved all their reference pages. The aggregate
+7/8 meets the split-level threshold but does not mean every question has complete
+recall. The withheld split has not been evaluated.
