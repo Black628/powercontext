@@ -316,8 +316,9 @@ or alter prepared content. Historical restoration preserves the stored content w
 
 Descriptions are authoritative revision content and copied transactionally to `pc_atomic_memory_current.description`.
 Manifest queries select narrow metadata columns, never `text`, `searchable_text`, vectors or `pc_artifacts.content`.
-Neither reading the manifest nor opening an existing database generates summaries. Startup adds the nullable projection
-column without scanning bodies. Existing projection rows remain null until explicit projection repair or a new write.
+Neither reading the manifest nor opening an existing database generates summaries. Registered migration `v1_4_1_004`
+adds the nullable projection column without scanning bodies; existing managed databases require explicit migration.
+Existing projection rows remain null until explicit projection repair or a new write.
 Topic recovery initialization accepts both the original pristine Atomic maintenance layout and its exact nullable-description
 variant; unknown columns, changed FTS objects, and existing Atomic evidence remain rejected.
 The existing offline `atomic-memory-rebuild-projection` command copies stored descriptions; it never generates new ones.

@@ -235,13 +235,13 @@ def test_explicit_writes_preserve_descriptions_without_model_requests(tmp_path, 
     asyncio.run(scenario())
 
 
-def test_existing_projection_adds_summary_column_and_rebuild_copies_authority(tmp_path):
+def test_projection_rebuild_copies_authoritative_description(tmp_path):
     import sqlite3
 
     from powercontext.builtin.runtime.atomic_memory_rebuild import rebuild_atomic_memory_projection
 
     async def scenario():
-        async with _server(tmp_path) as (_, client, _):
+        async with _server(tmp_path) as (app, client, _):
             scope = await _scope(client)
             created = await client.post(
                 f"/v1/scopes/{scope}/artifacts",
@@ -259,9 +259,8 @@ def test_existing_projection_adds_summary_column_and_rebuild_copies_authority(tm
             exact_path = f"/v1/scopes/{scope}/artifacts/atomic-memory/{identifier}/revisions/1"
             before = await client.get(exact_path)
             assert before.status_code == 200
-        with sqlite3.connect(tmp_path / "regressions.db") as connection:
-            connection.execute("ALTER TABLE pc_atomic_memory_current DROP COLUMN description")
-        async with _server(tmp_path) as (app, client, _):
+            with sqlite3.connect(tmp_path / "regressions.db") as connection:
+                connection.execute("UPDATE pc_atomic_memory_current SET description = NULL")
             manifest = await client.post("/v1/recall/manifest", json={"scope_id": scope})
             assert manifest.status_code == 200, manifest.text
             assert manifest.json()["items"][0]["description"] is None

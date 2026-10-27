@@ -288,7 +288,8 @@ unsupported 通过 `ServerResponseError.status_code`、`.code`、`.details` 检�
 
 权威摘要保存在对应 Artifact 内容版本中，并在同一事务中复制到 `pc_atomic_memory_current.description`。
 清单查询只选择窄元数据列，不读取 `text`、`searchable_text`、向量或 `pc_artifacts.content`。
-清单读取和数据库启动都不会生成摘要。启动只幂等添加可空的投影列，不扫描正文；已有投影行在显式修复或新写入前保持空值。
+清单读取和数据库启动都不会生成摘要。已登记迁移 `v1_4_1_004` 添加可空投影列，不扫描正文；已有受管库需要显式迁移。
+已有投影行在显式修复或新写入前保持空值。
 Topic 恢复初始化同时识别原始的空 Atomic 维护结构和仅新增可空简介列的结构；未知列、改动的 FTS 对象和已有 Atomic 证据仍被拒绝。
 现有离线 `atomic-memory-rebuild-projection` 命令只复制已保存的摘要，不生成新摘要；完整校验和重建会扫描权威历史和当前行，
 并可能重新生成活跃记忆的向量，属于维护工作，不在增量写入或清单查询中执行。
