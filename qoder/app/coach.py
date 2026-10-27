@@ -347,9 +347,14 @@ class Coach:
                     )
                     # One weak-spot row per note: forget every stale wording so the
                     # panel and the prepared context do not accumulate duplicates.
+                    # Legacy memory envelopes (no atomic artifact ref) cannot be
+                    # retired; the new entry is still written and shown.
                     stale = await self._weaknesses_for(material)
                     for entry in stale:
-                        await self.memory.forget(entry["artifact"], int(entry.get("state_version") or 0))
+                        artifact = entry.get("artifact")
+                        if not artifact:
+                            continue
+                        await self.memory.forget(artifact, int(entry.get("state_version") or 0))
                     memory_write = await self.memory.remember(
                         "weakness",
                         text,
@@ -497,7 +502,12 @@ class Coach:
         try:
             for entry in await self.memory.entries():
                 if entry.get("kind") == "preference" and entry.get("state") == "active":
-                    await self.memory.forget(entry["artifact"], int(entry.get("state_version") or 0))
+                    artifact = entry.get("artifact")
+                    if not artifact:
+                        # Legacy envelope: no lifecycle handle, so the old
+                        # wording stays active; writing the new one still wins.
+                        continue
+                    await self.memory.forget(artifact, int(entry.get("state_version") or 0))
         except MemoryUnavailable:
             LOGGER.warning("could not retire previous preference; writing the new one anyway")
         return await self.memory.remember("preference", f"讲解偏好：{text}", reason="学习者在设置里显式保存")

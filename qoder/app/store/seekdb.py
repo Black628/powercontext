@@ -31,6 +31,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from pathlib import Path
 from datetime import UTC, datetime
 from typing import Any
 
@@ -125,19 +126,42 @@ class SeekdbStore:
 
     @staticmethod
     def _ensure_embedded_database(path: str, database: str) -> None:
-        """An embedded engine only ships the ``test`` catalog; create ours first."""
+        """An embedded engine only ships the ``test`` catalog; create ours first.
+
+        The embedded engine is a single-process database, so it must be
+        bootstrapped in a child process: opening a second engine on the same
+        path from the server process corrupts the native engine's heap.
+        A marker inside the catalog directory keeps normal restarts fast.
+        """
         if not database.replace("_", "").isalnum():
             raise ValueError(f"invalid seekdb database name: {database!r}")
-        from pyobvector.client.seekdb_engine import create_embedded_engine
+        catalog = Path(path)
+        marker = catalog / ".pc_bootstrapped"
+        if marker.exists():
+            return
+        import subprocess
+        import sys
 
+        code = (
+            "import sys\n"
+            "from pyobvector.client.seekdb_engine import create_embedded_engine\n"
+            "path, db = sys.argv[1], sys.argv[2]\n"
+            "engine = create_embedded_engine(path, database='test')\n"
+            "try:\n"
+            "    with engine.connect() as connection:\n"
+            "        connection.exec_driver_sql(f'CREATE DATABASE IF NOT EXISTS `{db}`')\n"
+            "        connection.commit()\n"
+            "finally:\n"
+            "    engine.dispose()\n"
+        )
         started = time.perf_counter()
-        engine = create_embedded_engine(path, database="test")
-        try:
-            with engine.connect() as connection:
-                connection.exec_driver_sql(f"CREATE DATABASE IF NOT EXISTS `{database}`")
-                connection.commit()
-        finally:
-            engine.dispose()
+        subprocess.run(
+            [sys.executable, "-c", code, str(catalog), database],
+            check=True,
+            timeout=180,
+            capture_output=True,
+        )
+        marker.write_text(database, encoding="utf-8")
         LOGGER.info("seekdb embedded database %r ensured in %.0f ms", database, (time.perf_counter() - started) * 1000)
 
     def close(self) -> None:
@@ -331,49 +355,111 @@ class SeekdbStore:
         vectors = self.embedder.embed(
             [f"{item['course']} {item['title']}\n{item['body']}" for item in materials]
         )
-        written = 0
-        for item, vector in zip(materials, vectors, strict=True):
-            payload = {
-                "id": item["id"],
-                "course": item["course"],
-                "chapter": item.get("chapter") or "",
-                "title": item["title"],
-                "body": item["body"],
-                "search_text": f"{item['title']} {item.get('chapter') or ''} {item['course']} {item['body']}",
-                "keywords": ",".join(item.get("keywords") or keywords(item["title"] + item["body"])),
-                "difficulty": str(int(item.get("difficulty") or 2)),
-                "source": item.get("source") or "",
-                "mastery": str(round(float(item.get("mastery") or 0.0), 4)),
-                "reviews": str(int(item.get("reviews") or 0)),
-                "last_verdict": item.get("last_verdict") or "",
-                "updated_at": item.get("updated_at") or _now(),
-            }
-            existing = self._execute(
+        payloads = [self._material_payload(item) for item in materials]
+        ids = [payload["id"] for payload in payloads]
+        existing = self._existing_ids(ids)
+        fresh = [
+            (payload, vector)
+            for payload, vector in zip(payloads, vectors, strict=True)
+            if payload["id"] not in existing
+        ]
+        # Per-row INSERTs into a fresh vector+FTS table cost seconds each; one
+        # multi-row statement is orders of magnitude faster and keeps first-run
+        # seeding inside a single HTTP round trip.
+        self._bulk_insert(fresh)
+        for payload, vector in zip(payloads, vectors, strict=True):
+            if payload["id"] not in existing:
+                continue
+            assignments = ", ".join(f"{name} = :{name}" for name in payload if name != "id")
+            self._execute(
                 channel="write",
-                sql=f"SELECT id FROM {MATERIALS_TABLE} WHERE id = :id",
-                params={"id": payload["id"]},
+                sql=f"UPDATE {MATERIALS_TABLE} SET {assignments}, embedding = :embedding WHERE id = :id",
+                params={**payload, "embedding": vector},
+                show_params={**payload, "embedding": summarize_vector(vector)},
             )
-            if existing:
-                assignments = ", ".join(f"{name} = :{name}" for name in payload if name != "id")
-                self._execute(
+        return len(payloads)
+
+    @staticmethod
+    def _material_payload(item: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "id": item["id"],
+            "course": item["course"],
+            "chapter": item.get("chapter") or "",
+            "title": item["title"],
+            "body": item["body"],
+            "search_text": f"{item['title']} {item.get('chapter') or ''} {item['course']} {item['body']}",
+            "keywords": ",".join(item.get("keywords") or keywords(item["title"] + item["body"])),
+            "difficulty": str(int(item.get("difficulty") or 2)),
+            "source": item.get("source") or "",
+            "mastery": str(round(float(item.get("mastery") or 0.0), 4)),
+            "reviews": str(int(item.get("reviews") or 0)),
+            "last_verdict": item.get("last_verdict") or "",
+            "updated_at": item.get("updated_at") or _now(),
+        }
+
+    def _existing_ids(self, ids: list[str]) -> set[str]:
+        if not ids:
+            return set()
+        names = [f"id_{index}" for index in range(len(ids))]
+        params = {name: value for name, value in zip(names, ids, strict=True)}
+        rows = self._execute(
+            channel="write",
+            sql=f"SELECT id FROM {MATERIALS_TABLE} WHERE id IN ({', '.join(':' + name for name in names)})",
+            params=params,
+        )
+        return {row["id"] for row in rows}
+
+    def _bulk_insert(self, rows: list[tuple[dict[str, Any], list[float]]]) -> None:
+        if not rows:
+            return
+        from sqlalchemy import bindparam, text
+
+        from pyobvector import VECTOR
+
+        columns = (
+            "id",
+            "course",
+            "chapter",
+            "title",
+            "body",
+            "search_text",
+            "keywords",
+            "difficulty",
+            "source",
+            "mastery",
+            "reviews",
+            "last_verdict",
+            "updated_at",
+            "embedding",
+        )
+        tuples: list[str] = []
+        params: dict[str, Any] = {}
+        binds: list[Any] = []
+        for index, (payload, vector) in enumerate(rows):
+            names = [f"{column}_{index}" for column in columns]
+            tuples.append("(" + ", ".join(f":{name}" for name in names) + ")")
+            for column, name in zip(columns, names, strict=True):
+                params[name] = vector if column == "embedding" else payload[column]
+            binds.append(bindparam(f"embedding_{index}", type_=VECTOR(self.dim)))
+        statement = text(
+            f"INSERT INTO {MATERIALS_TABLE} ({', '.join(columns)}) VALUES " + ", ".join(tuples)
+        ).bindparams(*binds)
+        started = time.perf_counter()
+        with self.engine.connect() as connection:
+            connection.execute(statement, params)
+            connection.commit()
+        self._record(
+            timed(
+                TraceEntry(
                     channel="write",
-                    sql=f"UPDATE {MATERIALS_TABLE} SET {assignments}, embedding = :embedding WHERE id = :id",
-                    params={**payload, "embedding": vector},
-                    show_params={**payload, "embedding": summarize_vector(vector)},
-                )
-            else:
-                self.client.insert(MATERIALS_TABLE, data=[{**payload, "embedding": vector}])
-                self._record(
-                    TraceEntry(
-                        channel="write",
-                        sql=f"INSERT INTO {MATERIALS_TABLE} (...) VALUES (...)",
-                        params={"id": payload["id"], "embedding": summarize_vector(vector)},
-                        rows=1,
-                        duration_ms=0.0,
-                    )
-                )
-            written += 1
-        return written
+                    sql=f"INSERT INTO {MATERIALS_TABLE} (...) VALUES " + ", ".join("(...)" for _ in rows),
+                    params={"rows": len(rows)},
+                    rows=len(rows),
+                    duration_ms=0.0,
+                ),
+                started,
+            )
+        )
 
     def record_review(self, review: dict[str, Any]) -> None:
         payload = {
@@ -498,7 +584,6 @@ class SeekdbStore:
                 if approximate:
                     continue
                 raise
-            self.approximate_supported = approximate
             entry = timed(
                 TraceEntry(
                     channel="vector",
@@ -509,8 +594,13 @@ class SeekdbStore:
                 ),
                 started,
             )
-            trace.append(entry)
             self._record(entry)
+            if approximate and not rows:
+                # A freshly built vector index may still be empty while the
+                # base table has rows; retry the exact scan before accepting [].
+                continue
+            self.approximate_supported = approximate
+            trace.append(entry)
             results = []
             for row in rows:
                 material = _row_to_dict(row).to_dict()

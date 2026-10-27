@@ -145,16 +145,16 @@ cd qoder
 ```
 === 后端：seekdb / embedded｜embedding builtin-hash-1024｜记忆 在线
 [PASS] status 返回后端信息
-[PASS] 载入样例资料 | materials=9 reviews≥10
+[PASS] 载入样例资料 | materials=9 reviews=1
 [PASS] seekdb 混合检索有结果 | hit0=进程与线程
 [PASS] 创建复习 session | cards=3
---- PowerContext 上下文（1504 字节）
-    ...BEGIN_POWERCONTEXT_PREPARED_CONTEXT_V1 ...已注入 4 条薄弱点 + 1 条偏好...
-[PASS] 评分并更新掌握度 | verdict=again answer=不可剥夺 mastery=0.0
+--- PowerContext 上下文（583 字节）
+    ...BEGIN_POWERCONTEXT_PREPARED_CONTEXT_V1 ...已注入 1 条薄弱点...
+[PASS] 评分并更新掌握度 | verdict=again answer=异常 mastery=0.0
 [PASS] seekdb 相关原文回显 | related=2
---- 记忆写入：《操作系统》死锁的四个必要条件：概念「不可剥夺」还没记牢（复习第 6 次仍然答错）。
+--- 记忆写入：《操作系统》虚拟内存与页面置换：概念「异常」还没记牢（复习第 1 次仍然答错）。
 [PASS] PowerContext 写入学习记忆
-[PASS] 记忆快照可读 | active=5 preference=True
+[PASS] 记忆快照可读 | active=2 preference=False
 [PASS] 保存讲解偏好 | 讲解偏好：先给反例，再给结论
 [PASS] seekdb 执行记录可核对 | rows=10
 [PASS] PowerContext 读写记录可核对 | rows=10
@@ -172,7 +172,7 @@ cd qoder
 
 如果刻意不安装 `powercontext`，则记忆相关 3 步显示 `[SKIP]`，结果为 `7/7 步通过，3 步跳过（仅记忆面板）`。
 
-真实输出会随作答内容变化；行数、上下文字节数以本机实际为准。空库首次运行时 `context/prepare` 还没有记忆可拼，上下文字节数为 0、`active=1`（脚本写入的第一条），第二轮起上下文就会带上上一轮的薄弱点。
+真实输出会随作答内容变化；行数、上下文字节数以本机实际为准。空库首次运行时 `context/prepare` 还没有记忆可拼，上下文字节数为 0、`active=1`（脚本写入的第一条），第二轮起上下文就会带上上一轮的薄弱点；上面是本机第二次运行的输出（已有上一轮复习，`active=2`、上下文 583 字节）。
 
 ### 6.4 界面截图与演示录屏（WSL seekdb 主通道实测）
 
@@ -183,7 +183,7 @@ cd qoder
 | [`docs/screenshots/03-graded.png`](docs/screenshots/03-graded.png) | 作答后：所选错误项、正确答案、掌握度、seekdb 相关原文回显、已写入 PowerContext 的薄弱点文本 |
 | [`docs/screenshots/04-memory.png`](docs/screenshots/04-memory.png) | 记忆面板与「PowerContext 读写」：条目可「修正」「失效」，右侧是真实请求/响应记录 |
 
-[`site/assets/demo.mp4`](site/assets/demo.mp4)（13 秒，另有 [`demo.gif`](site/assets/demo.gif)）是同一套页面上的完整操作录屏：载入首页 → 开始一轮复习 → 答错并看到薄弱点写入 → 切到 PowerContext 读写记录。截图与录屏都由 CDP 驱动无头 Edge 在 1500×1150 视口下抓取，页面与数据来自同一套 `app/` 代码。
+[`site/assets/demo.mp4`](site/assets/demo.mp4)（8 秒，另有 [`demo.gif`](site/assets/demo.gif)）是同一套页面上的完整操作录屏：载入首页 → 开始一轮复习 → 答错并看到薄弱点写入 → 切到 PowerContext 读写记录。截图与录屏都由 CDP 驱动无头 Edge 在 1500×1150 视口下抓取，页面与数据来自同一套 `app/` 代码。
 
 
 ### 6.5 离线单元测试（不依赖 seekdb / 网络 / PowerContext）
