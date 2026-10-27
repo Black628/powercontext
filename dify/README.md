@@ -9,7 +9,7 @@
 
 ## 1. 玩法与体验
 
-1. 打开应用，开场白会让你填一个「玩家 ID」（例如 `shen`），这是账本上你的名字。
+1. 打开应用，开场白会让你填一个「玩家 ID」（例如 `shen`），这是账本上你的名字；留空也行，会自动用 Dify 的会话用户 ID 兜底。
 2. 在客栈里自由发挥：摔碗赖账、赔礼道歉、打听掌柜的旧相好、胡说八道都行。
 3. 每一回合有两件事同时发生：
    - 柜台后的阿箬检索你以前的账，用古风口吻回应，怨气越高越刻薄；
@@ -154,7 +154,7 @@ Dify → 工作室 → 创建/导入 → **导入 DSL 文件** → 选择 `dify/
 
 | # | 节点 | 类型 | 作用 |
 | --- | --- | --- | --- |
-| 1 | `start` 报上名号 | start | 变量 `player_id`（可空，空则记为 guest） |
+| 1 | `start` 报上名号 | start | 变量 `player_id`（可空：空则取 Dify 用户 ID 前 8 位加 `dx-` 前缀，仍空则 `guest`） |
 | 2 | `prep` 身份与话术整理 | code | 清洗 ID；把本回合原话转成可安全拼进 JSON 的 `query_json`；生成 `reason_json` |
 | 3 | `pc_scope` 开一本账 | http | `POST /v1/scopes`，`idempotency_key=grudge-inn-<id>`；返回服务端生成的 `scope_id` |
 | 4 | `pick` 记下账本号 | code | 从 `body` 中取 `scope_id`，供后续节点使用 |
@@ -193,7 +193,7 @@ python dify/scripts/memory_audit.py --player shen
 
 1. **词法检索**：PowerContext 的 SQLite 后端用 FTS5（中文按单字/双字 bigram 建索引），检索依赖字面重合。作品已把玩家原话写进账目正文来提高命中率，但若新话题与旧账毫无共同字词，`prepare` 会返回 `empty`（日志 `chatflow-replay-after-favor.log` 就是这种情况），此时掌柜只按账本面板反应。想要语义召回可把 PowerContext 后端换成 seekdb（向量检索）或配置 Embedding。
 2. **需要模型 key**：两个 LLM 节点必须绑定可用模型；`replay_chatflow.py` 的罐头输出只用于验证接线，不代表真实叙事质量。
-3. **无鉴权演示**：PowerContext 默认仅 loopback、无鉴权；玩家隔离靠 `player_id` 分区，没有身份校验，属于单机演示定位。
+3. **无鉴权演示**：PowerContext 默认仅 loopback、无鉴权；玩家隔离靠玩家 ID（`player_id`，空则由 Dify 用户 ID 兜底）分区，没有身份校验，属于单机演示定位。
 4. **seekdb 未使用**：题面允许 "seekdb、PowerContext 至少一种"。seekdb 的 Python 依赖仅在 Linux/macOS 提供，本作品在 Windows 上开发与验证，因此选择 PowerContext；若要加 seekdb，只需按 PowerContext 文档把持久化后端切换为 seekdb，DSL 无需改动。
 5. **Dify 版本**：DSL 按 1.9.2 导出（0.4.0）。在更新版本（如 1.17.1 / 0.7.0）导入会提示版本较旧，导入与运行正常；若评审环境为更老的 1.4 及以下，可能缺少部分节点字段，请以 1.9.2+ 为准。
 

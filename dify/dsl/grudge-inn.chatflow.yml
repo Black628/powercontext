@@ -242,8 +242,12 @@ workflow:
           import re
 
 
-          def main(player_id: str, utterance: str) -> dict:
-              raw = (player_id or "").strip() or "guest"
+          def main(player_id: str, user_id: str, utterance: str) -> dict:
+              raw = (player_id or "").strip()
+              if not raw:
+                  # 没报名号时退回 Dify 的会话身份，保证同一位体验者跨会话共用一本账。
+                  user = (user_id or "").strip()
+                  raw = "dx-" + user[:8] if user else "guest"
               # 只保留字母数字、汉字与下划线/连字符，避免 scope 标识里出现奇怪字符
               key = re.sub(r"[^0-9A-Za-z_\u4e00-\u9fff-]", "-", raw)[:48] or "guest"
               said = (utterance or "").strip() or "（客人沉默不语）"
@@ -253,7 +257,7 @@ workflow:
                   "reason_json": json.dumps("玩家原话：" + said, ensure_ascii=False),
               }
         code_language: python3
-        desc: 规范化玩家ID，并把这一回合的话转成可直接拼进 JSON 的安全字面量
+        desc: 规范化玩家ID（留空则用 Dify 会话用户兜底），并把这一回合的话转成可直接拼进 JSON 的安全字面量
         outputs:
           player_key:
             children: null
@@ -273,6 +277,11 @@ workflow:
           - player_id
           value_type: string
           variable: player_id
+        - value_selector:
+          - sys
+          - user_id
+          value_type: string
+          variable: user_id
         - value_selector:
           - sys
           - query

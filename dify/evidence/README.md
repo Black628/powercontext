@@ -14,9 +14,9 @@
 | `chatflow-replay-returning.log` | 同玩家第二次进来，整条看图执行 | `prepare=ready`，面板 `第2次 怨气25/100`，账本里出现青瓷碗那条 |
 | `chatflow-replay-favor.log` | 赔罪记为 `favor` | `parse.kind=favor`，正文含原话；下一回合怨气 25+25−18 |
 | `chatflow-replay-after-favor.log` | 怨气回收 + 词法检索边界 | 面板 `第4次 怨气32/100`；但本回合 `prepare=empty`，因为「客栈开了多少年」与旧账没有共同字词 |
-| `memory-audit.log` | 账本内容与版本历史可对账 | `entries` 里每笔账带 `citation`（entry_id/revision）、`kind`、正文；`changes` 记录每次 add/deactivate 及 reason |
+| `memory-audit.log` | 账本内容与版本历史可对账 | `entries`（4 条，含最后一条 `neutral` 闲话）里每笔账带 `citation`（entry_id/revision）、`kind`、正文；`changes` 记录每次 add/deactivate 及 reason |
 
-`memory-audit.log` 里的 revision 会是 10 左右而不是 4：`reset_player.py` 的 retire、重复验证都会推进 Memory 的 revision。这正是"不可变历史"的设计 —— 每次变更都留痕，不做原地覆盖。
+`memory-audit.log` 里是 `revision: 4`（四回合各推进一次）；如果你在本地又跑了 `reset_player.py` 或重复验证，revision 会继续增长 —— 这正是"不可变历史"的设计：每次变更都留痕，不做原地覆盖。
 
 ## 怎么复现
 
@@ -41,10 +41,11 @@
 .venv\Scripts\python.exe dify\scripts\memory_audit.py --player cui
 ```
 
-只想验证"记忆能写能读"、不关心 DSL 时，用更短的：
+只想验证"记忆能写能读"、不关心 DSL 时，用更短的（第一条命令对应 `memory-demo.log`，第二条对应 `memory-second-visit.log`）：
 
 ```powershell
-.venv\Scripts\python.exe dify\scripts\pc_http_demo.py --player shen
+.venv\Scripts\python.exe dify\scripts\pc_http_demo.py --player demo --reset   # 空账本开局，两回合写入碗与酒
+.venv\Scripts\python.exe dify\scripts\pc_http_demo.py --player demo           # 新进程：开局就带出两条旧账
 ```
 
 ## 关于 `replay_chatflow.py` 的边界

@@ -46,7 +46,7 @@ START_VARIABLE_TYPES = {
     "checkbox",
     "file",
     "file-list",
-    "json_object",
+    "external_data_tool",
 }
 SELECTOR_RE = re.compile(r"\{\{#([^#]+)#\}\}")
 SYS_VARS = {
@@ -56,7 +56,39 @@ SYS_VARS = {
     "user_id",
     "dialogue_count",
     "app_id",
+    "workflow_id",
     "workflow_run_id",
+}
+# core/variables/types.py: SegmentType in Dify 1.9.2.
+SEGMENT_TYPES = {
+    "string",
+    "number",
+    "integer",
+    "float",
+    "object",
+    "secret",
+    "file",
+    "boolean",
+    "array[any]",
+    "array[string]",
+    "array[number]",
+    "array[object]",
+    "array[boolean]",
+    "array[file]",
+}
+# api/factories/variable_factory.py: accepted environment/conversation variable types.
+ENV_VALUE_TYPES = {
+    "string",
+    "secret",
+    "number",
+    "integer",
+    "float",
+    "boolean",
+    "object",
+    "array[string]",
+    "array[number]",
+    "array[object]",
+    "array[boolean]",
 }
 
 
@@ -120,6 +152,25 @@ class Checker:
             self.err(f"version {version!r} is not major.minor.patch")
         self.check_viewport()
         self.check_features()
+        self.check_environment_variables()
+
+    def check_environment_variables(self) -> None:
+        """api/factories/variable_factory.py requires name + value_type + value."""
+        seen: set[str] = set()
+        for item in (self.doc.get("workflow") or {}).get("environment_variables") or []:
+            name = item.get("name")
+            if not name:
+                self.err("environment variable without name")
+                continue
+            if name in seen:
+                self.err(f"duplicate environment variable {name}")
+            seen.add(name)
+            if item.get("value_type") not in ENV_VALUE_TYPES:
+                self.err(f"env.{name}: value_type {item.get('value_type')!r} is not accepted by Dify 1.9.2")
+            if "value" not in item or item.get("value") is None:
+                self.err(f"env.{name}: value missing")
+            if item.get("value_type") == "string" and not isinstance(item.get("value"), str):
+                self.err(f"env.{name}: string variable needs a string value")
 
     def check_viewport(self) -> None:
         viewport = (self.doc.get("workflow") or {}).get("graph", {}).get("viewport")
@@ -209,8 +260,18 @@ class Checker:
         if not outputs:
             self.err(f"{node_id}: outputs is empty")
         for name, spec in outputs.items():
-            if not (spec or {}).get("type"):
-                self.err(f"{node_id}.{name}: output type missing")
+            spec = spec or {}
+            if spec.get("type") not in SEGMENT_TYPES:
+                self.err(f"{node_id}.{name}: output type {spec.get('type')!r} is not a Dify SegmentType")
+            children = spec.get("children")
+            if children is not None and not isinstance(children, dict):
+                self.err(f"{node_id}.{name}: children must be null or an object")
+        for item in data.get("variables") or []:
+            if not item.get("variable"):
+                self.err(f"{node_id}: input without variable name")
+            selector = item.get("value_selector")
+            if not (isinstance(selector, list) and len(selector) == 2):
+                self.err(f"{node_id}: input {item.get('variable')!r} needs a 2-item value_selector")
 
     def check_http_request(self, node_id: str, data: dict[str, Any]) -> None:
         if not data.get("url"):
@@ -240,6 +301,23 @@ class Checker:
             self.err(f"{node_id}: headers must be a string")
         if not isinstance(data.get("params"), str):
             self.err(f"{node_id}: params must be a string")
+        if authorization.get("type") == "no-auth" and authorization.get("config") is not None:
+            self.warn(f"{node_id}: no-auth node carries authorization.config; Dify forces it to null")
+        for item in body.get("data") or []:
+            if item.get("type") not in {"file", "text"}:
+                self.err(f"{node_id}: body item type must be file/text")
+            if not isinstance(item.get("key"), str):
+                self.err(f"{node_id}: body item key must be a string")
+            if item.get("type") == "text" and not isinstance(item.get("value"), str):
+                self.err(f"{node_id}: body item value must be a string")
+        timeout = data.get("timeout")
+        if timeout is not None:
+            if not isinstance(timeout, dict):
+                self.err(f"{node_id}: timeout must be an object")
+            else:
+                for key in ("connect", "read", "write"):
+                    if key in timeout and not isinstance(timeout[key], int):
+                        self.err(f"{node_id}: timeout.{key} must be an int")
         retry = data.get("retry_config") or {}
         if retry.get("max_retries") and not retry.get("retry_enabled"):
             self.warn(f"{node_id}: retries configured but retry_enabled is false")
@@ -250,16 +328,29 @@ class Checker:
             self.err(f"{node_id}: model.provider/name missing")
         if model.get("mode") != "chat":
             self.err(f"{node_id}: model.mode must be 'chat'")
+        completion = model.get("completion_params")
+        if completion is not None and not isinstance(completion, dict):
+            self.err(f"{node_id}: model.completion_params must be an object")
         templates = data.get("prompt_template") or []
         if not templates:
             self.err(f"{node_id}: prompt_template is empty")
         for message in templates:
-            if message.get("role") not in {"system", "user", "assistant"}:
+            if message.get("role") not in {"system", "user", "assistant", "tool"}:
                 self.err(f"{node_id}: bad prompt role {message.get('role')!r}")
             if not (message.get("text") or "").strip():
                 self.err(f"{node_id}: prompt message text is empty")
         if not any(message.get("role") == "system" for message in templates):
             self.warn(f"{node_id}: no system prompt")
+        context = data.get("context")
+        if not isinstance(context, dict) or "enabled" not in context:
+            self.err(f"{node_id}: context is required by Dify 1.9.2")
+        elif context.get("enabled"):
+            selector = context.get("variable_selector")
+            if not (isinstance(selector, list) and len(selector) == 2):
+                self.err(f"{node_id}: context.enabled needs a 2-item variable_selector")
+        vision = data.get("vision")
+        if vision is not None and not isinstance(vision, dict):
+            self.err(f"{node_id}: vision must be an object")
 
     def check_if_else(self, node_id: str, data: dict[str, Any]) -> None:
         cases = data.get("cases") or []
@@ -299,6 +390,15 @@ class Checker:
             if key in seen:
                 self.err(f"duplicate edge {source} -> {target}")
             seen.add(key)
+            data = edge.get("data") or {}
+            if source in self.by_id and data.get("sourceType"):
+                actual = self.data(self.by_id[source]).get("type")
+                if data["sourceType"] != actual:
+                    self.err(f"edge {edge.get('id')}: sourceType {data['sourceType']!r} != {actual!r}")
+            if target in self.by_id and data.get("targetType"):
+                actual = self.data(self.by_id[target]).get("type")
+                if data["targetType"] != actual:
+                    self.err(f"edge {edge.get('id')}: targetType {data['targetType']!r} != {actual!r}")
             if source in self.by_id and target in self.by_id:
                 self.check_selector_edge(source, target)
         for node_id, node in self.by_id.items():

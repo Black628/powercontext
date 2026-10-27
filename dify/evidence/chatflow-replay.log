@@ -8,18 +8,18 @@
   reason_json = "玩家原话：我把你柜上的青瓷碗摔了，一文不赔"
 
 ### pc_scope (http-request)
-  body = {"scope_id":"scp_2qme6gyf5t7nb5g0j315446z26","title":"记仇客栈 · cui","summary":"客栈掌柜的恩怨账本，玩家 cui 在此留下的每一笔账。","parent_scope_id":null,"context_references":[],"extern
+  body = {"scope_id":"scp_1qp4ae4sy78sbj5vwsvj2e8yzj","title":"记仇客栈 · cui","summary":"客栈掌柜的恩怨账本，玩家 cui 在此留下的每一笔账。","parent_scope_id":null,"context_references":[],"extern
   status_code = 201
 
 ### pick (code)
-  scope_id = scp_2qme6gyf5t7nb5g0j315446z26
+  scope_id = scp_1qp4ae4sy78sbj5vwsvj2e8yzj
 
 ### pc_prepare (http-request)
   body = {"schema":"powercontext.prepared-context.v1","status":"empty","content":null,"content_bytes":0}
   status_code = 200
 
 ### pc_list (http-request)
-  body = {"memory":{"family":"memory","artifact_id":"memory","revision":6},"entries":[]}
+  body = {"memory":null,"entries":[]}
   status_code = 200
 
 ### panel (code)
@@ -41,7 +41,7 @@
   ledger_json = "客人摔碎了柜台上一只青瓷碗，还赖着不赔。（原话：我把你柜上的青瓷碗摔了，一文不赔）"
 
 ### pc_remember (http-request)
-  body = {"memory":{"family":"memory","artifact_id":"memory","revision":7},"entry":{"citation":{"memory_ref":{"family":"memory","artifact_id":"memory","revision":7},"ent
+  body = {"memory":{"family":"memory","artifact_id":"memory","revision":1},"entry":{"citation":{"memory_ref":{"family":"memory","artifact_id":"memory","revision":1},"ent
   status_code = 200
 
 ### answer (answer)

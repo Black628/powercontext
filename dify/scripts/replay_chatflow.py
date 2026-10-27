@@ -47,7 +47,7 @@ class Replay:
         }
         self.base_url = base_url.rstrip("/")
         self.outputs: dict[str, dict[str, str]] = {}
-        self.sys = {"query": ""}
+        self.sys = {"query": "", "user_id": "dify-replay-user"}
 
     # -- selector plumbing -------------------------------------------------
     def resolve(self, selector: list[str]) -> str:
@@ -168,6 +168,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--dsl", default="dify/dsl/grudge-inn.chatflow.yml")
     parser.add_argument("--base-url", default="http://127.0.0.1:8000")
     parser.add_argument("--player", default="shen")
+    parser.add_argument("--user-id", default="dify-replay-user", help="stand-in for sys.user_id when --player is empty")
     parser.add_argument("--query", default="我把碗摔了，钱也不赔，你能拿我怎样？")
     parser.add_argument("--judge", default=JUDGE_JSON, help="canned judge JSON: what this turn should be recorded as")
     parser.add_argument("--judge-file", help="read the canned judge JSON from a file instead (avoids shell quoting)")
@@ -176,7 +177,7 @@ def main(argv: list[str]) -> int:
     judge_text = Path(args.judge_file).read_text(encoding="utf-8") if args.judge_file else args.judge
     dsl = yaml.safe_load(Path(args.dsl).read_text(encoding="utf-8"))
     replay = Replay(dsl, args.base_url, judge_text=judge_text)
-    replay.sys = {"query": args.query}
+    replay.sys = {"query": args.query, "user_id": args.user_id}
     replay.sys["player_id"] = args.player
     replay.start()
     return 0
