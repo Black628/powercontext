@@ -21,7 +21,7 @@ from collections.abc import Sequence
 from sqlalchemy import Connection, MetaData, Table, inspect, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncConnection
-from sqlalchemy.schema import CreateTable
+from sqlalchemy.schema import CreateTable, sort_tables
 
 from powercontext.builtin.persistence.bootstrap import mysql_error_code
 
@@ -62,12 +62,12 @@ def _create_mysql_tables(connection: Connection, tables: Sequence[Table]) -> Non
     Existing tables are left untouched. This initializes missing tables; it does
     not reconcile existing schemas or replace the explicit migration workflow.
     """
-    groups: dict[MetaData, set[Table]] = {}
-    for table in tables:
-        groups.setdefault(table.metadata, set()).add(table)
-    for metadata, selected in groups.items():
-        for table in metadata.sorted_tables:
-            if table not in selected or inspect(connection).has_table(table.name, schema=table.schema):
+    groups: dict[MetaData, list[Table]] = {}
+    for table in dict.fromkeys(tables):
+        groups.setdefault(table.metadata, []).append(table)
+    for selected in groups.values():
+        for table in sort_tables(selected):
+            if inspect(connection).has_table(table.name, schema=table.schema):
                 continue
             connection.execute(CreateTable(table, if_not_exists=True))
             for index in sorted(table.indexes, key=lambda item: str(item.name)):
