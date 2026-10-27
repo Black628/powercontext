@@ -1,0 +1,19 @@
+# SDD context module -------------------------------------------------------
+# The sdd package itself uses only the Python standard library (3.11+).
+
+# Material index backend (Linux x86_64/aarch64 and macOS arm64):
+# embedded seekdb.  On Windows the same SQL runs on SQLite
+# (`--backend sqlite`), so the wheel is skipped there.
+pylibseekdb==1.4.0.post1; sys_platform == "linux" or (sys_platform == "darwin" and platform_machine == "arm64")
+pymysql>=1.1.1
+
+# Tests --------------------------------------------------------------------
+pytest>=8
+
+# Task-state persistence (PowerContext Server + CLI) -----------------------
+powercontext[cli,server]==1.4.1
+
+# PowerContext 1.4.1 requires SQLite >= 3.38.  The launcher
+# (scripts/powercontext_launcher.py) uses this bundled SQLite when the
+# interpreter's sqlite3 module is older, e.g. on Ubuntu 22.04.
+pysqlite3-binary>=0.5.4; sys_platform == "linux" and platform_machine == "x86_64" and python_version < "3.14"

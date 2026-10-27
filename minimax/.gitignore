@@ -1,0 +1,13 @@
+# Runtime data of the demo (material index, SQL log, PowerContext data).
+.data/
+run/
+
+# Python caches
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# Editor noise
+.vscode/
+.idea/

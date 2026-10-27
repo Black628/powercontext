@@ -1,0 +1,271 @@
+{
+  "schema": "sdd.context.v1",
+  "run_id": "ctx-20261028010338216",
+  "task": "订单满 99 元免运费；会员折扣后金额不足 99 元时应按折后金额判断，金卡会员始终免运费。",
+  "generated_at": "2026-10-28T01:03:38+08:00",
+  "backend": "seekdb",
+  "workspace": "/mnt/e/powercontext-ecosystem/minimax/workspace",
+  "query_tokens": [
+    "订单",
+    "单满",
+    "元免",
+    "免运",
+    "运费",
+    "会员",
+    "员折",
+    "折扣",
+    "扣后",
+    "后金",
+    "金额",
+    "额不",
+    "不足",
+    "元时",
+    "时应",
+    "应按",
+    "按折",
+    "折后",
+    "额判",
+    "判断",
+    "金卡",
+    "卡会",
+    "员始",
+    "始终",
+    "终免"
+  ],
+  "primary_clauses": [
+    "S-04"
+  ],
+  "spec_clauses": [
+    {
+      "clause_id": "S-04",
+      "title": "运费",
+      "body": "订单包邮门槛按“会员折扣后金额”判断：折后金额大于等于 99.00 元时免运费；低于\n99.00 元收取 8.00 元运费。`gold` 会员始终免运费。",
+      "path": "workspace/specs/pricing_rules.md",
+      "line_start": 25,
+      "line_end": 28,
+      "digest": "sha256:270ddc83d538b08d5d8319cf2575c8521d13472228a07f9049c50f3ec8dc91ae",
+      "score": 23,
+      "stale": false
+    },
+    {
+      "clause_id": "S-02",
+      "title": "会员折扣",
+      "body": "会员等级分为 `gold`、`silver`、`none`。`gold` 享受小计 10% 的折扣，`silver` 享受\n5% 的折扣，`none` 不打折。折扣金额按四舍五入保留两位小数。未知会员等级应抛出\n`ValueError`。",
+      "path": "workspace/specs/pricing_rules.md",
+      "line_start": 14,
+      "line_end": 18,
+      "digest": "sha256:b842565632eca82b7f3ce26c9bf48c553259d9bd6ac419c8842e2db7b13bd192",
+      "score": 14,
+      "stale": false
+    },
+    {
+      "clause_id": "S-03",
+      "title": "优惠券",
+      "body": "优惠券金额在会员折扣之后扣减。扣减后应付金额不得为负数：若优惠券金额超过折后\n金额，应付金额取 0。优惠券金额不得为负数。",
+      "path": "workspace/specs/pricing_rules.md",
+      "line_start": 20,
+      "line_end": 23,
+      "digest": "sha256:42a7e344da8c0dfcaab32dfd4fb5970c97454a57f536807911059e7490c00ba2",
+      "score": 11,
+      "stale": false
+    },
+    {
+      "clause_id": "S-01",
+      "title": "订单小计",
+      "body": "订单小计为所有商品行 `单价 × 数量` 之和。金额使用 Decimal 计算，并按四舍五入\n（ROUND_HALF_UP）保留两位小数。商品行缺少 `unit_price` 或 `quantity` 时应抛出\n`ValueError`，不得静默跳过。",
+      "path": "workspace/specs/pricing_rules.md",
+      "line_start": 8,
+      "line_end": 12,
+      "digest": "sha256:eecadcef56b80b74831e81d29efe16073c9605b99212264dcae09d37eee3d80e",
+      "score": 6,
+      "stale": false
+    },
+    {
+      "clause_id": "S-05",
+      "title": "应付总额",
+      "body": "应付总额 = max(0, 小计 − 会员折扣 − 优惠券金额) + 运费。最终结果保留两位小数，\n返回值包含 `subtotal`、`member_discount`、`coupon`、`shipping`、`payable` 五个字段。",
+      "path": "workspace/specs/pricing_rules.md",
+      "line_start": 30,
+      "line_end": 33,
+      "digest": "sha256:f2cf4acf0cd3fa1b7933cbe08ad16ece9497dcd22971836e3bae3b0b38bf7d88",
+      "score": 5,
+      "stale": false
+    }
+  ],
+  "code_symbols": [
+    {
+      "symbol_id": "workspace/src/pricing/engine.py::shipping",
+      "kind": "function",
+      "qualname": "shipping",
+      "path": "workspace/src/pricing/engine.py",
+      "line_start": 60,
+      "line_end": 69,
+      "signature": "shipping(amount_before_discount: Decimal, tier: str, amount_after_discount: Decimal)",
+      "docstring": "Return the shipping fee for an order (S-04).\n\nThe free-shipping decision is taken from the pre-discount amount and uses a\nstrict comparison, so orders that only reach the threshold after a discount\nare charged shipping.  ``tier`` is accepted but not yet used.",
+      "clause_refs": "S-04",
+      "score": 5,
+      "reason": "docstring references S-04"
+    }
+  ],
+  "tests": {
+    "target": [
+      {
+        "test_id": "workspace/tests/test_shipping.py::test_shipping_is_free_at_the_exact_threshold",
+        "name": "test_shipping_is_free_at_the_exact_threshold",
+        "path": "workspace/tests/test_shipping.py",
+        "line_start": 13,
+        "line_end": 17,
+        "docstring": "Covers: S-04. A post-discount amount of exactly 99.00 qualifies for free shipping.",
+        "covers": "S-04",
+        "reason": "covers S-04"
+      },
+      {
+        "test_id": "workspace/tests/test_shipping.py::test_shipping_uses_the_post_discount_amount",
+        "name": "test_shipping_uses_the_post_discount_amount",
+        "path": "workspace/tests/test_shipping.py",
+        "line_start": 20,
+        "line_end": 24,
+        "docstring": "Covers: S-04. A 100.00 order with a silver discount drops to 95.00 and pays shipping.",
+        "covers": "S-04",
+        "reason": "covers S-04"
+      },
+      {
+        "test_id": "workspace/tests/test_shipping.py::test_gold_members_always_get_free_shipping",
+        "name": "test_gold_members_always_get_free_shipping",
+        "path": "workspace/tests/test_shipping.py",
+        "line_start": 27,
+        "line_end": 31,
+        "docstring": "Covers: S-04. Gold membership waives the shipping fee for small orders.",
+        "covers": "S-04",
+        "reason": "covers S-04"
+      }
+    ],
+    "regression": [
+      {
+        "test_id": "workspace/tests/test_engine.py::test_subtotal_multiplies_unit_price_by_quantity",
+        "name": "test_subtotal_multiplies_unit_price_by_quantity",
+        "path": "workspace/tests/test_engine.py",
+        "line_start": 14,
+        "line_end": 22,
+        "docstring": "Covers: S-01. The subtotal is the sum of all order lines.",
+        "covers": "S-01",
+        "reason": "covers S-01"
+      },
+      {
+        "test_id": "workspace/tests/test_engine.py::test_subtotal_rounds_half_up_to_cents",
+        "name": "test_subtotal_rounds_half_up_to_cents",
+        "path": "workspace/tests/test_engine.py",
+        "line_start": 25,
+        "line_end": 28,
+        "docstring": "Covers: S-01. Three-decimal prices are rounded half-up.",
+        "covers": "S-01",
+        "reason": "covers S-01"
+      },
+      {
+        "test_id": "workspace/tests/test_engine.py::test_order_line_without_price_is_rejected",
+        "name": "test_order_line_without_price_is_rejected",
+        "path": "workspace/tests/test_engine.py",
+        "line_start": 31,
+        "line_end": 34,
+        "docstring": "Covers: S-01. Incomplete order lines fail loudly instead of being skipped.",
+        "covers": "S-01",
+        "reason": "covers S-01"
+      },
+      {
+        "test_id": "workspace/tests/test_engine.py::test_gold_member_receives_ten_percent_discount",
+        "name": "test_gold_member_receives_ten_percent_discount",
+        "path": "workspace/tests/test_engine.py",
+        "line_start": 37,
+        "line_end": 40,
+        "docstring": "Covers: S-02. Gold membership discounts the subtotal by ten percent.",
+        "covers": "S-02",
+        "reason": "covers S-02"
+      },
+      {
+        "test_id": "workspace/tests/test_engine.py::test_unknown_member_tier_is_rejected",
+        "name": "test_unknown_member_tier_is_rejected",
+        "path": "workspace/tests/test_engine.py",
+        "line_start": 43,
+        "line_end": 46,
+        "docstring": "Covers: S-02. Unsupported membership levels are rejected.",
+        "covers": "S-02",
+        "reason": "covers S-02"
+      },
+      {
+        "test_id": "workspace/tests/test_engine.py::test_coupon_never_makes_the_order_negative",
+        "name": "test_coupon_never_makes_the_order_negative",
+        "path": "workspace/tests/test_engine.py",
+        "line_start": 49,
+        "line_end": 53,
+        "docstring": "Covers: S-03. A coupon larger than the amount due yields zero, not a credit.",
+        "covers": "S-03",
+        "reason": "covers S-03"
+      },
+      {
+        "test_id": "workspace/tests/test_engine.py::test_coupon_is_applied_after_the_member_discount",
+        "name": "test_coupon_is_applied_after_the_member_discount",
+        "path": "workspace/tests/test_engine.py",
+        "line_start": 56,
+        "line_end": 60,
+        "docstring": "Covers: S-03. The coupon is deducted from the post-discount amount.",
+        "covers": "S-03",
+        "reason": "covers S-03"
+      },
+      {
+        "test_id": "workspace/tests/test_engine.py::test_payable_is_subtotal_plus_shipping",
+        "name": "test_payable_is_subtotal_plus_shipping",
+        "path": "workspace/tests/test_engine.py",
+        "line_start": 63,
+        "line_end": 67,
+        "docstring": "Covers: S-05. All amount fields are returned with two decimals.",
+        "covers": "S-05",
+        "reason": "covers S-05"
+      }
+    ]
+  },
+  "task_state": {
+    "source": "powercontext",
+    "scope_id": "scp_77srg4mj6z0xk1xhkhw54xeac0",
+    "artifact_id": "art_f7246e11cc7d4b87ab26c1fa2a8caa5e",
+    "revision": 2,
+    "status": "verified",
+    "completed": [
+      "材料已导入并完成上下文选择（ctx-20261028010330313）",
+      "目标测试全部通过（3 个）",
+      "回归测试全部通过（8 个）"
+    ],
+    "pending": [],
+    "verification": [
+      {
+        "check": "target tests (3 expected)",
+        "command": "/home/rst/sdd-conda/bin/python -m pytest -v -rA tests",
+        "result": "3 passed, 0 failed",
+        "at": "2026-10-28T01:03:30+08:00",
+        "passed": [
+          "test_gold_members_always_get_free_shipping",
+          "test_shipping_is_free_at_the_exact_threshold",
+          "test_shipping_uses_the_post_discount_amount"
+        ],
+        "failed": []
+      },
+      {
+        "check": "regression tests (8 expected)",
+        "command": "/home/rst/sdd-conda/bin/python -m pytest -v -rA tests",
+        "result": "8 passed, 0 failed",
+        "at": "2026-10-28T01:03:30+08:00",
+        "passed": [
+          "test_coupon_is_applied_after_the_member_discount",
+          "test_coupon_never_makes_the_order_negative",
+          "test_gold_member_receives_ten_percent_discount",
+          "test_order_line_without_price_is_rejected",
+          "test_payable_is_subtotal_plus_shipping",
+          "test_subtotal_multiplies_unit_price_by_quantity",
+          "test_subtotal_rounds_half_up_to_cents",
+          "test_unknown_member_tier_is_rejected"
+        ],
+        "failed": []
+      }
+    ]
+  },
+  "warnings": []
+}

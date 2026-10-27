@@ -1,0 +1,47 @@
+你是本项目的实现工程师。请只依据下面的规范条款修改代码，不要改动测试断言。
+
+任务：订单满 99 元免运费；会员折扣后金额不足 99 元时应按折后金额判断，金卡会员始终免运费。
+
+必须满足的条款：
+
+[S-04] 运费（主条款）
+订单包邮门槛按“会员折扣后金额”判断：折后金额大于等于 99.00 元时免运费；低于
+99.00 元收取 8.00 元运费。`gold` 会员始终免运费。
+
+[S-02] 会员折扣
+会员等级分为 `gold`、`silver`、`none`。`gold` 享受小计 10% 的折扣，`silver` 享受
+5% 的折扣，`none` 不打折。折扣金额按四舍五入保留两位小数。未知会员等级应抛出
+`ValueError`。
+
+[S-03] 优惠券
+优惠券金额在会员折扣之后扣减。扣减后应付金额不得为负数：若优惠券金额超过折后
+金额，应付金额取 0。优惠券金额不得为负数。
+
+[S-01] 订单小计
+订单小计为所有商品行 `单价 × 数量` 之和。金额使用 Decimal 计算，并按四舍五入
+（ROUND_HALF_UP）保留两位小数。商品行缺少 `unit_price` 或 `quantity` 时应抛出
+`ValueError`，不得静默跳过。
+
+[S-05] 应付总额
+应付总额 = max(0, 小计 − 会员折扣 − 优惠券金额) + 运费。最终结果保留两位小数，
+返回值包含 `subtotal`、`member_discount`、`coupon`、`shipping`、`payable` 五个字段。
+
+涉及代码：
+- workspace/src/pricing/engine.py:60-69 `shipping(amount_before_discount: Decimal, tier: str, amount_after_discount: Decimal)`
+
+新增/目标测试（当前失败）：
+- workspace/tests/test_shipping.py::test_shipping_is_free_at_the_exact_threshold
+- workspace/tests/test_shipping.py::test_shipping_uses_the_post_discount_amount
+- workspace/tests/test_shipping.py::test_gold_members_always_get_free_shipping
+
+回归测试（必须保持通过）：
+- workspace/tests/test_engine.py::test_subtotal_multiplies_unit_price_by_quantity
+- workspace/tests/test_engine.py::test_subtotal_rounds_half_up_to_cents
+- workspace/tests/test_engine.py::test_order_line_without_price_is_rejected
+- workspace/tests/test_engine.py::test_gold_member_receives_ten_percent_discount
+- workspace/tests/test_engine.py::test_unknown_member_tier_is_rejected
+- workspace/tests/test_engine.py::test_coupon_never_makes_the_order_negative
+- workspace/tests/test_engine.py::test_coupon_is_applied_after_the_member_discount
+- workspace/tests/test_engine.py::test_payable_is_subtotal_plus_shipping
+
+输出要求：给出修改后的完整函数实现，并说明为什么满足条款。

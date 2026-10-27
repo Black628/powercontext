@@ -1,0 +1,20 @@
+[demo] checking the PowerContext installation
+[demo] $ /home/rst/judge-env/bin/python -c import importlib.metadata as m; print('powercontext', m.version('powercontext'))
+[demo] starting PowerContext Server
+[demo] PowerContext Server ready at http://127.0.0.1:8137
+[demo] resetting the demo project to the before state
+[demo] ingesting specs, code and tests into the material index
+[demo] $ /home/rst/judge-env/bin/python -m sdd ingest --backend seekdb --db /home/rst/judgehome/.local/share/minimax-sdd/index
+[demo] selecting the development context and remembering it in PowerContext
+[demo] $ /home/rst/judge-env/bin/python -m sdd select --task 订单满 99 元免运费；会员折扣后金额不足 99 元时应按折后金额判断，金卡会员始终免运费。 --remember --out /home/rst/judge/minimax/evidence/context-latest --powercontext-url http://127.0.0.1:8137 --backend seekdb --db /home/rst/judgehome/.local/share/minimax-sdd/index
+[demo] running the target tests before the change (expected: 3 failed, 8 passed)
+[demo] $ /home/rst/judge-env/bin/python -m pytest -v -rA tests
+[demo] applying the change produced by MiniMax (evidence/after/engine.py)
+[demo] verifying target + regression tests through sdd verify
+[demo] $ /home/rst/judge-env/bin/python -m sdd verify --task 订单满 99 元免运费；会员折扣后金额不足 99 元时应按折后金额判断，金卡会员始终免运费。 --log /home/rst/judge/minimax/evidence/pytest-after.log --require-state --powercontext-url http://127.0.0.1:8137 --backend seekdb --db /home/rst/judgehome/.local/share/minimax-sdd/index
+[demo] restarting PowerContext Server
+[demo] reading the task state back after the restart
+[demo] $ /home/rst/judge-env/bin/python -m sdd state --backend seekdb --db /home/rst/judgehome/.local/share/minimax-sdd/index --powercontext-url http://127.0.0.1:8137
+[demo] rebuilding the context with the remembered task state
+[demo] $ /home/rst/judge-env/bin/python -m sdd select --task 订单满 99 元免运费；会员折扣后金额不足 99 元时应按折后金额判断，金卡会员始终免运费。 --out /home/rst/judge/minimax/evidence/context-after-verify --powercontext-url http://127.0.0.1:8137 --backend seekdb --db /home/rst/judgehome/.local/share/minimax-sdd/index
+[demo] all checks passed

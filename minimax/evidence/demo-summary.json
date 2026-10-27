@@ -1,0 +1,127 @@
+{
+  "backend": "seekdb",
+  "db": "/home/rst/.local/share/minimax-sdd/index",
+  "port": 54433,
+  "ingest": {
+    "run_id": "ingest-20261028010324",
+    "backend": "seekdb",
+    "db": "seekdb:/home/rst/.local/share/minimax-sdd/index/sdd",
+    "workspace": "/mnt/e/powercontext-ecosystem/minimax/workspace",
+    "counts": {
+      "spec_clauses": 5,
+      "code_symbols": 7,
+      "tests": 11,
+      "context_runs": 11
+    },
+    "sql_log": "/mnt/e/powercontext-ecosystem/minimax/.data/logs/sql.log"
+  },
+  "select": {
+    "run_id": "ctx-20261028010326670",
+    "primary_clauses": [
+      "S-04"
+    ],
+    "clauses": [
+      "S-04",
+      "S-02",
+      "S-03",
+      "S-01",
+      "S-05"
+    ],
+    "symbols": [
+      "workspace/src/pricing/engine.py::shipping"
+    ],
+    "target_tests": [
+      "workspace/tests/test_shipping.py::test_shipping_is_free_at_the_exact_threshold",
+      "workspace/tests/test_shipping.py::test_shipping_uses_the_post_discount_amount",
+      "workspace/tests/test_shipping.py::test_gold_members_always_get_free_shipping"
+    ],
+    "regression_tests": [
+      "workspace/tests/test_engine.py::test_subtotal_multiplies_unit_price_by_quantity",
+      "workspace/tests/test_engine.py::test_subtotal_rounds_half_up_to_cents",
+      "workspace/tests/test_engine.py::test_order_line_without_price_is_rejected",
+      "workspace/tests/test_engine.py::test_gold_member_receives_ten_percent_discount",
+      "workspace/tests/test_engine.py::test_unknown_member_tier_is_rejected",
+      "workspace/tests/test_engine.py::test_coupon_never_makes_the_order_negative",
+      "workspace/tests/test_engine.py::test_coupon_is_applied_after_the_member_discount",
+      "workspace/tests/test_engine.py::test_payable_is_subtotal_plus_shipping"
+    ]
+  },
+  "before": {
+    "passed": 8,
+    "failed": 3
+  },
+  "verify": {
+    "status": "verified",
+    "pytest_exit_code": 0,
+    "target": {
+      "tests/test_shipping.py::test_shipping_is_free_at_the_exact_threshold": "PASSED",
+      "tests/test_shipping.py::test_shipping_uses_the_post_discount_amount": "PASSED",
+      "tests/test_shipping.py::test_gold_members_always_get_free_shipping": "PASSED"
+    },
+    "regression": {
+      "tests/test_engine.py::test_subtotal_multiplies_unit_price_by_quantity": "PASSED",
+      "tests/test_engine.py::test_subtotal_rounds_half_up_to_cents": "PASSED",
+      "tests/test_engine.py::test_order_line_without_price_is_rejected": "PASSED",
+      "tests/test_engine.py::test_gold_member_receives_ten_percent_discount": "PASSED",
+      "tests/test_engine.py::test_unknown_member_tier_is_rejected": "PASSED",
+      "tests/test_engine.py::test_coupon_never_makes_the_order_negative": "PASSED",
+      "tests/test_engine.py::test_coupon_is_applied_after_the_member_discount": "PASSED",
+      "tests/test_engine.py::test_payable_is_subtotal_plus_shipping": "PASSED"
+    },
+    "verification": [
+      {
+        "check": "target tests (3 expected)",
+        "command": "/home/rst/sdd-conda/bin/python -m pytest -v -rA tests",
+        "result": "3 passed, 0 failed",
+        "at": "2026-10-28T01:03:30+08:00",
+        "passed": [
+          "test_gold_members_always_get_free_shipping",
+          "test_shipping_is_free_at_the_exact_threshold",
+          "test_shipping_uses_the_post_discount_amount"
+        ],
+        "failed": []
+      },
+      {
+        "check": "regression tests (8 expected)",
+        "command": "/home/rst/sdd-conda/bin/python -m pytest -v -rA tests",
+        "result": "8 passed, 0 failed",
+        "at": "2026-10-28T01:03:30+08:00",
+        "passed": [
+          "test_coupon_is_applied_after_the_member_discount",
+          "test_coupon_never_makes_the_order_negative",
+          "test_gold_member_receives_ten_percent_discount",
+          "test_order_line_without_price_is_rejected",
+          "test_payable_is_subtotal_plus_shipping",
+          "test_subtotal_multiplies_unit_price_by_quantity",
+          "test_subtotal_rounds_half_up_to_cents",
+          "test_unknown_member_tier_is_rejected"
+        ],
+        "failed": []
+      }
+    ],
+    "state_saved": {
+      "artifact_id": "art_f7246e11cc7d4b87ab26c1fa2a8caa5e",
+      "revision": 2
+    },
+    "log": "/mnt/e/powercontext-ecosystem/minimax/evidence/pytest-after.log",
+    "context_run": "ctx-20261028010330313"
+  },
+  "state_after_restart": {
+    "scope_id": "scp_77srg4mj6z0xk1xhkhw54xeac0",
+    "artifact_id": "art_f7246e11cc7d4b87ab26c1fa2a8caa5e",
+    "revision": 2,
+    "status": "verified",
+    "verification_entries": 2
+  },
+  "select_with_state": {
+    "run_id": "ctx-20261028010338216",
+    "task_state": {
+      "source": "powercontext",
+      "status": "verified",
+      "completed": 3,
+      "pending": 0,
+      "verification": 2
+    }
+  },
+  "ok": true
+}

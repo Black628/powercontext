@@ -1,0 +1,36 @@
+﻿diff --git a/evidence/before/engine.py b/evidence/after/engine.py
+index e9034441..7e8bf850 100644
+--- a/evidence/before/engine.py
++++ b/evidence/after/engine.py
+@@ -57,14 +57,17 @@ def amount_after_discount(total: Decimal, tier: str) -> Decimal:
+     return money(max(ZERO, total - member_discount(total, tier)))
+ 
+ 
+-def shipping(amount_before_discount: Decimal, tier: str, amount_after_discount: Decimal) -> Decimal:
++def shipping(amount_after_discount: Decimal, tier: str) -> Decimal:
+     """Return the shipping fee for an order (S-04).
+ 
+-    The free-shipping decision is taken from the pre-discount amount and uses a
+-    strict comparison, so orders that only reach the threshold after a discount
+-    are charged shipping.  ``tier`` is accepted but not yet used.
++    The free-shipping decision is taken from the post-discount amount: an
++    amount of at least ``FREE_SHIPPING_THRESHOLD`` (99.00) ships free, and
++    anything below it is charged ``SHIPPING_FEE`` (8.00).  ``gold`` members
++    always ship free.
+     """
+-    if amount_before_discount > FREE_SHIPPING_THRESHOLD:
++    if tier == "gold":
++        return ZERO
++    if amount_after_discount >= FREE_SHIPPING_THRESHOLD:
+         return ZERO
+     return SHIPPING_FEE
+ 
+@@ -84,7 +87,7 @@ def settle(
+         raise ValueError("coupon amount must not be negative")
+ 
+     payable = money(max(ZERO, after_discount - coupon_amount))
+-    fee = shipping(total, tier, after_discount)
++    fee = shipping(after_discount, tier)
+ 
+     return {
+         "subtotal": total,

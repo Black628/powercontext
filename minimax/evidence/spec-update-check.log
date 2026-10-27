@@ -1,0 +1,19 @@
+[spec-update] S-04 now reads: 订单包邮门槛按“会员折扣后金额”判断：折后金额大于等于 120.00 元时免运费；低于 120.00 元收取 8.00 元运费。`gold` 会员始终免运费。
+[spec-update] $ /home/rst/sdd-conda/bin/python -m sdd ingest --workspace /tmp/sdd-spec-update-k4ujlknb/workspace --backend seekdb --db /tmp/sdd-spec-update-k4ujlknb/index
+[spec-update] $ /home/rst/sdd-conda/bin/python -m sdd select --workspace /tmp/sdd-spec-update-k4ujlknb/workspace --task 订单满 99 元免运费；会员折扣后金额不足 99 元时应按折后金额判断，金卡会员始终免运费。 --no-state --backend seekdb --db /tmp/sdd-spec-update-k4ujlknb/index --out /tmp/sdd-spec-update-k4ujlknb/context
+{
+  "ok": true,
+  "backend": "seekdb",
+  "spec_counts": {
+    "spec_clauses": 5,
+    "code_symbols": 7,
+    "tests": 11,
+    "context_runs": 0
+  },
+  "primary_clauses": [
+    "S-04"
+  ],
+  "clause_body": "订单包邮门槛按“会员折扣后金额”判断：折后金额大于等于 120.00 元时免运费；低于 120.00 元收取 8.00 元运费。`gold` 会员始终免运费。",
+  "digest": "sha256:a463d7bda20f60895c28de315dfb1e7db4a0a13ff4261e62ff90afc8f179cfbf"
+}
+[spec-update] OK: the re-imported spec is what the context quotes

@@ -1,0 +1,17 @@
+2026-10-28T01:03:24+08:00  GET    /v1/scopes?query=minimax-sdd-pricing&query_field=title&limit=50  -> 200
+2026-10-28T01:03:24+08:00  POST   /v1/scopes  -> 201  title='minimax-sdd-pricing'
+2026-10-28T01:03:24+08:00  POST   /v1/atomic-memory/list  -> 200  kind=sdd-task-state
+2026-10-28T01:03:26+08:00  POST   /v1/atomic-memory/list  -> 200  kind=sdd-task-state
+2026-10-28T01:03:27+08:00  POST   /v1/scopes/scp_77srg4mj6z0xk1xhkhw54xeac0/artifacts  -> 201  family=atomic-memory
+2026-10-28T01:03:28+08:00  GET    /v1/scopes?query=minimax-sdd-pricing&query_field=title&limit=50  -> 200
+2026-10-28T01:03:28+08:00  POST   /v1/atomic-memory/list  -> 200  kind=sdd-task-state
+2026-10-28T01:03:28+08:00  GET    /v1/scopes/scp_77srg4mj6z0xk1xhkhw54xeac0/artifacts/atomic-memory/art_f7246e11cc7d4b87ab26c1fa2a8caa5e  -> 200
+2026-10-28T01:03:30+08:00  POST   /v1/atomic-memory/list  -> 200  kind=sdd-task-state
+2026-10-28T01:03:30+08:00  GET    /v1/scopes/scp_77srg4mj6z0xk1xhkhw54xeac0/artifacts/atomic-memory/art_f7246e11cc7d4b87ab26c1fa2a8caa5e  -> 200
+2026-10-28T01:03:30+08:00  PUT    /v1/scopes/scp_77srg4mj6z0xk1xhkhw54xeac0/artifacts/atomic-memory/art_f7246e11cc7d4b87ab26c1fa2a8caa5e  -> 200  If-Match="revision:1"
+2026-10-28T01:03:36+08:00  GET    /v1/scopes?query=minimax-sdd-pricing&query_field=title&limit=50  -> 200
+2026-10-28T01:03:36+08:00  POST   /v1/atomic-memory/list  -> 200  kind=sdd-task-state
+2026-10-28T01:03:36+08:00  GET    /v1/scopes/scp_77srg4mj6z0xk1xhkhw54xeac0/artifacts/atomic-memory/art_f7246e11cc7d4b87ab26c1fa2a8caa5e  -> 200
+2026-10-28T01:03:36+08:00  GET    /v1/scopes?query=minimax-sdd-pricing&query_field=title&limit=50  -> 200
+2026-10-28T01:03:36+08:00  POST   /v1/atomic-memory/list  -> 200  kind=sdd-task-state
+2026-10-28T01:03:36+08:00  GET    /v1/scopes/scp_77srg4mj6z0xk1xhkhw54xeac0/artifacts/atomic-memory/art_f7246e11cc7d4b87ab26c1fa2a8caa5e  -> 200
