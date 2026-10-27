@@ -41,7 +41,12 @@ from powercontext.builtin.inference.errors import (
 from powercontext.builtin.inference.models import GenerationResult
 from powercontext.builtin.inference.pydantic_ai import PydanticAIConfigurationError
 from powercontext.builtin.inference.tokens import character_token_estimator
-from powercontext.builtin.persistence.atomic_memory_index import AtomicMemoryIndexError
+from powercontext.builtin.persistence.atomic_memory_index import (
+    AtomicMemoryIndexError,
+    AtomicMemoryIndexFilter,
+    AtomicMemorySearchRequest,
+    RelationalAtomicMemoryIndex,
+)
 from powercontext.builtin.processing_diagnostics import (
     ProcessingDiagnostics,
     ProcessingFailureReason,
@@ -248,11 +253,36 @@ def test_json_formatter_serializes_the_new_processing_fields() -> None:
     ("code", "stage", "reason"),
     [
         ("embedding-result", ProcessingStage.EMBEDDING, ProcessingFailureReason.INVALID_OUTPUT),
+        ("embedding-input", ProcessingStage.EMBEDDING, ProcessingFailureReason.INVALID_OUTPUT),
+        ("embedding-values", ProcessingStage.EMBEDDING, ProcessingFailureReason.INVALID_OUTPUT),
         ("embedding-profile", ProcessingStage.EMBEDDING, ProcessingFailureReason.CONFIGURATION),
         ("content", ProcessingStage.BUSINESS_VALIDATION, ProcessingFailureReason.INVALID_OUTPUT),
         ("prepared-content", ProcessingStage.BUSINESS_VALIDATION, ProcessingFailureReason.INVALID_OUTPUT),
+        ("limit", ProcessingStage.BUSINESS_VALIDATION, ProcessingFailureReason.INVALID_OUTPUT),
+        ("mode", ProcessingStage.BUSINESS_VALIDATION, ProcessingFailureReason.INVALID_OUTPUT),
+        ("admission", ProcessingStage.BUSINESS_VALIDATION, ProcessingFailureReason.INVALID_OUTPUT),
+        ("threshold", ProcessingStage.BUSINESS_VALIDATION, ProcessingFailureReason.INVALID_OUTPUT),
+        ("batch-size", ProcessingStage.BUSINESS_VALIDATION, ProcessingFailureReason.INVALID_OUTPUT),
+        ("vector-search", ProcessingStage.BUSINESS_VALIDATION, ProcessingFailureReason.INVALID_OUTPUT),
+        ("state", ProcessingStage.BUSINESS_VALIDATION, None),
         ("family", None, ProcessingFailureReason.CONFIGURATION),
-        ("stale-recall", ProcessingStage.PERSISTENCE, ProcessingFailureReason.STORAGE_FAILURE),
+        ("dialect", None, ProcessingFailureReason.CONFIGURATION),
+        ("sqlite", None, ProcessingFailureReason.CONFIGURATION),
+        ("sqlite-fts", None, ProcessingFailureReason.CONFIGURATION),
+        ("sqlite-vector", None, ProcessingFailureReason.CONFIGURATION),
+        ("oceanbase", None, ProcessingFailureReason.CONFIGURATION),
+        ("oceanbase-fts", None, ProcessingFailureReason.CONFIGURATION),
+        ("oceanbase-vector", None, ProcessingFailureReason.CONFIGURATION),
+        ("vector-schema", None, ProcessingFailureReason.CONFIGURATION),
+        ("current-schema", None, ProcessingFailureReason.CONFIGURATION),
+        ("authority-schema", None, ProcessingFailureReason.CONFIGURATION),
+        ("migration-pending", None, ProcessingFailureReason.CONFIGURATION),
+        ("maintenance-required", None, ProcessingFailureReason.CONFIGURATION),
+        ("publication", ProcessingStage.PERSISTENCE, ProcessingFailureReason.STORAGE_FAILURE),
+        ("authority-orphan", ProcessingStage.PERSISTENCE, ProcessingFailureReason.STORAGE_FAILURE),
+        ("authority-head", ProcessingStage.PERSISTENCE, ProcessingFailureReason.STORAGE_FAILURE),
+        ("authority-content", ProcessingStage.PERSISTENCE, ProcessingFailureReason.STORAGE_FAILURE),
+        ("incomplete-vector", ProcessingStage.PERSISTENCE, ProcessingFailureReason.STORAGE_FAILURE),
     ],
 )
 def test_atomic_memory_index_errors_classify_by_code(code, stage, reason) -> None:
@@ -261,6 +291,23 @@ def test_atomic_memory_index_errors_classify_by_code(code, stage, reason) -> Non
     assert diagnostics is not None
     assert diagnostics.stage is stage
     assert diagnostics.reason is reason
+
+
+@pytest.mark.parametrize("code", ["stale-projection", "stale-recall", "rebuild-conflict", "future-code"])
+def test_unrecognized_atomic_memory_index_codes_stay_unclassified(code) -> None:
+    assert classify_processing_error(AtomicMemoryIndexError(code, "bounded detail")) is None
+
+
+def test_index_request_validation_is_not_classified_as_a_storage_failure() -> None:
+    request = AtomicMemorySearchRequest(query="bounded", filters=AtomicMemoryIndexFilter(), limit=0)
+
+    with pytest.raises(AtomicMemoryIndexError, match="limit") as raised:
+        RelationalAtomicMemoryIndex.validate_request(request)
+
+    diagnostics = classify_processing_error(raised.value)
+    assert diagnostics is not None
+    assert diagnostics.stage is ProcessingStage.BUSINESS_VALIDATION
+    assert diagnostics.reason is ProcessingFailureReason.INVALID_OUTPUT
 
 
 def test_safe_classifier_never_escapes() -> None:

@@ -225,26 +225,54 @@ def classify_processing_error(error: BaseException) -> ProcessingDiagnostics | N
         return ProcessingDiagnostics(stage=stage, reason=ProcessingFailureReason.CONFIGURATION)
     if "AtomicMemoryIndexError" in names:
         code = str(getattr(error, "code", "") or "").lower()
-        if code in {"embedding-profile", "embedding-input", "embedding-result"}:
+        if code == "embedding-profile":
             return ProcessingDiagnostics(
                 stage=ProcessingStage.EMBEDDING,
-                reason=(
-                    ProcessingFailureReason.CONFIGURATION
-                    if code == "embedding-profile"
-                    else ProcessingFailureReason.INVALID_OUTPUT
-                ),
+                reason=ProcessingFailureReason.CONFIGURATION,
             )
-        if code in {"content", "prepared-content"}:
+        if code in {"embedding-input", "embedding-result", "embedding-values"}:
+            return ProcessingDiagnostics(
+                stage=ProcessingStage.EMBEDDING,
+                reason=ProcessingFailureReason.INVALID_OUTPUT,
+            )
+        if code in {
+            "content",
+            "prepared-content",
+            "limit",
+            "mode",
+            "admission",
+            "threshold",
+            "batch-size",
+            "vector-search",
+        }:
             return ProcessingDiagnostics(
                 stage=ProcessingStage.BUSINESS_VALIDATION,
                 reason=ProcessingFailureReason.INVALID_OUTPUT,
             )
-        if code == "family":
+        if code == "state":
+            return ProcessingDiagnostics(stage=ProcessingStage.BUSINESS_VALIDATION)
+        if code in {
+            "family",
+            "dialect",
+            "oceanbase",
+            "sqlite",
+            "sqlite-fts",
+            "sqlite-vector",
+            "oceanbase-fts",
+            "oceanbase-vector",
+            "vector-schema",
+            "current-schema",
+            "authority-schema",
+            "migration-pending",
+            "maintenance-required",
+        }:
             return ProcessingDiagnostics(reason=ProcessingFailureReason.CONFIGURATION)
-        return ProcessingDiagnostics(
-            stage=ProcessingStage.PERSISTENCE,
-            reason=ProcessingFailureReason.STORAGE_FAILURE,
-        )
+        if code in {"publication", "authority-orphan", "authority-head", "authority-content", "incomplete-vector"}:
+            return ProcessingDiagnostics(
+                stage=ProcessingStage.PERSISTENCE,
+                reason=ProcessingFailureReason.STORAGE_FAILURE,
+            )
+        return None
     return None
 
 
