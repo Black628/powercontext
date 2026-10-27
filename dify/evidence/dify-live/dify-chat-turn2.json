@@ -1,0 +1,28 @@
+{
+  "event": "message",
+  "task_id": "081db827-d9f5-4044-a809-12a9bdebe898",
+  "id": "04d2d43c-4e14-4f51-bf11-0eb3c211c7d7",
+  "message_id": "04d2d43c-4e14-4f51-bf11-0eb3c211c7d7",
+  "conversation_id": "241e126f-9d59-411a-bdfb-820ffdcd1359",
+  "mode": "advanced-chat",
+  "answer": "（掌柜用袖子擦了擦柜台，抬眼打量你）客官这一手，倒是比门外那阵夜雨还响。后厨的伙计缩了缩脖子，连灯芯都跟着晃了一晃。这客栈开了三十七年，摔过碗的客人不少，可摔完了还站在那里理直气壮的，你是头一个。账我记下了，不急着催你赔。雨还没停，坐下喝口热的？\n\n1. 先坐下，听听掌柜打算怎么算这笔账。\n2. 嘴硬到底，说这碗本就该摔。\n3. 问问他，这客栈以前还住过什么怪客。\n\n【恩怨账本 · docker-final】第 2 次照面 · 怨气 25/100\n共 1 条：冒犯1／人情0／秘密0／闲话0\n- [冒犯] 在客栈柜台前摔碎了一只青瓷碗，且出言不逊（原话：我摔了你们柜台上的那只青瓷碗，你能把我怎么样？）\n",
+  "metadata": {
+    "annotation_reply": null,
+    "retriever_resources": [],
+    "usage": {
+      "prompt_tokens": 200,
+      "prompt_unit_price": "0.15",
+      "prompt_price_unit": "0.000001",
+      "prompt_price": "0.000030",
+      "completion_tokens": 120,
+      "completion_unit_price": "0.6",
+      "completion_price_unit": "0.000001",
+      "completion_price": "0.000072",
+      "total_tokens": 320,
+      "total_price": "0.000102",
+      "currency": "USD",
+      "latency": 0.033411962000172934
+    }
+  },
+  "created_at": 1793127264
+}

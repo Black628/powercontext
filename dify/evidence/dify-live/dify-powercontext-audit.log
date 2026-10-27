@@ -1,0 +1,96 @@
+## scope
+{
+  "scope_id": "scp_769f6yh8g6e01jwb9hks61ts5s",
+  "title": "记仇客栈 · docker-final",
+  "summary": "客栈掌柜的恩怨账本，玩家 docker-final 在此留下的每一笔账。",
+  "parent_scope_id": null,
+  "context_references": [],
+  "external_references": [],
+  "version": 1
+}
+## entries (2)
+{
+  "memory": {
+    "family": "memory",
+    "artifact_id": "memory",
+    "revision": 2
+  },
+  "entries": [
+    {
+      "citation": {
+        "memory_ref": {
+          "family": "memory",
+          "artifact_id": "memory",
+          "revision": 2
+        },
+        "entry_id": "mem_ent_d57e164f1cb942ecb104b3997ac10717",
+        "entry_version_id": "mem_ver_242e85c8059f4b2f86be8e4e33d529c4"
+      },
+      "version": 1,
+      "kind": "offense",
+      "text": "在客栈柜台前摔碎了一只青瓷碗，且出言不逊（原话：我摔了你们柜台上的那只青瓷碗，你能把我怎么样？）",
+      "state": "active",
+      "source_refs": [],
+      "artifact_refs": []
+    },
+    {
+      "citation": {
+        "memory_ref": {
+          "family": "memory",
+          "artifact_id": "memory",
+          "revision": 2
+        },
+        "entry_id": "mem_ent_f5fa517b5af84994be3852a6090fb44e",
+        "entry_version_id": "mem_ver_5f8fc1a2dfd446649410b54fee965036"
+      },
+      "version": 1,
+      "kind": "offense",
+      "text": "在客栈柜台前摔碎了一只青瓷碗，且出言不逊（原话：我又来了，今天还有什么好酒？）",
+      "state": "active",
+      "source_refs": [],
+      "artifact_refs": []
+    }
+  ]
+}
+## changes
+{
+  "memory": {
+    "family": "memory",
+    "artifact_id": "memory",
+    "revision": 2
+  },
+  "revisions": [
+    {
+      "memory_ref": {
+        "family": "memory",
+        "artifact_id": "memory",
+        "revision": 1
+      },
+      "changes": [
+        {
+          "op": "add",
+          "entry_id": "mem_ent_d57e164f1cb942ecb104b3997ac10717",
+          "from_entry_version_id": null,
+          "to_entry_version_id": "mem_ver_242e85c8059f4b2f86be8e4e33d529c4",
+          "reason": "玩家原话：我摔了你们柜台上的那只青瓷碗，你能把我怎么样？"
+        }
+      ]
+    },
+    {
+      "memory_ref": {
+        "family": "memory",
+        "artifact_id": "memory",
+        "revision": 2
+      },
+      "changes": [
+        {
+          "op": "add",
+          "entry_id": "mem_ent_f5fa517b5af84994be3852a6090fb44e",
+          "from_entry_version_id": null,
+          "to_entry_version_id": "mem_ver_5f8fc1a2dfd446649410b54fee965036",
+          "reason": "玩家原话：我又来了，今天还有什么好酒？"
+        }
+      ]
+    }
+  ]
+}

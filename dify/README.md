@@ -6,6 +6,7 @@
 - 赛题：Dify × OceanBase《Just for Fun——用 Dify 做一个好玩的智能应用》
 - 技术选型：**Dify（必选）+ PowerContext**（题面允许二选一；本作品未使用 seekdb，见「技术分工」）
 - 交付目录：`dify/`（DSL、运行说明、验证样例、证据、脚本）
+- 实机状态：已在 **Dify 1.9.2 官方 compose** 上完成「导入 → 发布 → 两个新会话跨会话翻旧账」，见 [`evidence/dify-live/`](evidence/dify-live/README.md)
 
 ## 1. 玩法与体验
 
@@ -43,7 +44,8 @@ dify/
 │   ├── memory-demo.log           # 同进程两回合：空账本 → 记一笔 → 召回
 │   ├── memory-second-visit.log   # 新进程首回合就召回两条旧账
 │   ├── chatflow-replay*.log      # 按 DSL 图真实执行 12 节点（首访/回访/赔罪/闲聊）
-│   └── memory-audit.log          # entries + changes：账本内容与版本历史
+│   ├── memory-audit.log          # entries + changes：账本内容与版本历史
+│   └── dify-live/                # 真实 Dify 1.9.2 部署下的导入记录与两轮跨会话对话
 └── scripts/
     ├── run_powercontext.py       # 用已安装的 PowerContext 或在仓库里起服务（127.0.0.1:8000）
     ├── validate_dsl.py           # DSL 静态校验（PyYAML；结构对照 0.4.0 样例，字段对照 Dify 1.9.2 实体）
@@ -72,7 +74,7 @@ dify/
 
 | 项 | 版本 / 说明 |
 | --- | --- |
-| Dify | **1.9.2**（`CURRENT_DSL_VERSION = 0.4.0`，与 DSL 完全匹配）。在 1.17.1（DSL 0.7.0）导入会提示「版本较旧」，属预期，功能不受影响 |
+| Dify | **1.9.2**（`CURRENT_DSL_VERSION = 0.4.0`，与 DSL 完全匹配）。已在官方 compose 部署的 1.9.2 实机导入并跑通；在 1.17.1（DSL 0.7.0）导入会提示「版本较旧」，属预期，功能不受影响 |
 | DSL | `version: 0.4.0`，`mode: advanced-chat`，`dependencies: []`（无插件依赖） |
 | PowerContext | **1.2.0**（PyPI：`powercontext[server,cli]`；`cli` 提供 `powercontext` 命令所需的 typer，只跑随附脚本则可省），SQLite + FTS5 持久化，无需 Embedding / Rerank |
 | Python | 3.11+（PowerContext 与随附脚本；3.13.5 实测） |
@@ -182,6 +184,7 @@ Dify → 工作室 → 创建/导入 → **导入 DSL 文件** → 选择 `dify/
 
 - 五步体验脚本：[`samples/verification.md`](samples/verification.md)（含初始状态、每步输入、预期表现、重置方法）
 - 运行证据与复现命令：[`evidence/README.md`](evidence/README.md)
+- **真实 Dify 1.9.2 实机验证**：[`evidence/dify-live/README.md`](evidence/dify-live/README.md) —— 用 Dify 官方 compose 起服务，DSL 导入 `status=completed`（0.4.0 ↔ 0.4.0），同一玩家 ID 在两个**不同会话**里分别得到「第 1 次 · 怨气 0/100」「第 2 次 · 怨气 25/100 · 冒犯1」，第二轮账目里带出了第一轮的原话。该轮模型层用本地 OpenAI 兼容 stub 换取确定性（只替换模型，12 节点、4 次 PowerContext 调用、3 个 code 节点均为真实执行）。
 - 静态校验：`python dify/scripts/validate_dsl.py dify/dsl/grudge-inn.chatflow.yml` → `OK: 0 errors`（该脚本额外需要 PyYAML：`python -m pip install pyyaml`；其余脚本只用标准库）
 
 无 Dify 环境时也可以验证记忆链路：

@@ -18,6 +18,16 @@
 
 `memory-audit.log` 里是 `revision: 4`（四回合各推进一次）；如果你在本地又跑了 `reset_player.py` 或重复验证，revision 会继续增长 —— 这正是"不可变历史"的设计：每次变更都留痕，不做原地覆盖。
 
+## 真实 Dify 1.9.2 实机证据
+
+上面的日志都在「没有 Dify」的环境里验证接线。另有一组在真实 Dify 1.9.2（官方 compose）里跑出来的记录，放在 [`dify-live/`](dify-live/README.md)：
+
+- 导入 DSL：`status=completed`，`current_dsl_version=0.4.0` = `imported_dsl_version`；
+- 同一玩家 ID、两个**不同会话**的两轮对话：面板从「第 1 次 · 怨气 0/100」变为「第 2 次 · 怨气 25/100 · 冒犯1」，第二轮账目里带出第一轮原话；
+- 附应用信息、发布后的 workflow draft、模型供应商、PowerContext 的 entries/changes。
+
+该轮模型层用本地 OpenAI 兼容 stub 以保证确定性，Dify 的节点执行、HTTP 调用与 PowerContext 读写都是真实的；换成真实模型不需要改 DSL。
+
 ## 怎么复现
 
 ```powershell
