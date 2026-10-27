@@ -248,7 +248,7 @@ jobs:
         run: |
           dbus-run-session -- bash -lc '
             set -euo pipefail
-            eval "$(gnome-keyring-daemon --start --components=secrets)"
+            eval "$(printf "%s\n" powercontext-ci | gnome-keyring-daemon --daemonize --login --components=secrets)"
             cargo run --locked --manifest-path src-tauri/Cargo.toml --example credential_probe
           '
       - name: Build unsigned Debian package
