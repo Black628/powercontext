@@ -93,14 +93,24 @@ async def legacy_foreign_keys(connection: AsyncConnection, tables: set[str]) -> 
 
 
 async def atomic_memory_readiness_issues(
-    connection: AsyncConnection, tables: set[str] | None = None, *, collections_removed: bool = True
+    connection: AsyncConnection,
+    tables: set[str] | None = None,
+    *,
+    collections_removed: bool = True,
+    require_evidence: bool = True,
 ) -> list[str]:
-    """Check versioned schema and public migration completion without reading retained history."""
+    """Check versioned schema and public migration completion without reading retained history.
+
+    ``require_evidence`` only relaxes the check before the registered revision that
+    introduces the evidence tables; a migrated head is still verified by its schema.
+    """
 
     if tables is None:
         tables = set(await connection.run_sync(lambda value: inspect(value).get_table_names()))
     issues: list[str] = []
-    if "pc_artifacts" in tables or any(table.name in tables for table in ATOMIC_MEMORY_EVIDENCE_TABLES):
+    if require_evidence and (
+        "pc_artifacts" in tables or any(table.name in tables for table in ATOMIC_MEMORY_EVIDENCE_TABLES)
+    ):
         try:
             await require_atomic_memory_evidence_schema(connection, tables)
         except AtomicMemoryEvidenceSchemaError as error:
