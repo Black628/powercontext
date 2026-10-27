@@ -1,0 +1,7 @@
+﻿recorded: 2026-10-28 (Asia/Shanghai)
+python: 3.13.5 | Windows-11-10.0.26200-SP0
+powercontext: 1.2.0
+powercontext backend: sqlite (FTS5, default)
+powercontext base_url: http://127.0.0.1:8000
+os: Windows (PowerShell 5.1)
+dify target: 1.9.2 (app DSL 0.4.0)

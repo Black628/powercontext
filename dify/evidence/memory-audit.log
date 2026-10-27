@@ -1,0 +1,258 @@
+## scope
+{
+  "scope_id": "scp_2qme6gyf5t7nb5g0j315446z26",
+  "title": "记仇客栈 · cui",
+  "summary": "客栈掌柜的恩怨账本，玩家 cui 在此留下的每一笔账。",
+  "parent_scope_id": null,
+  "context_references": [],
+  "external_references": [],
+  "version": 1
+}
+## entries (4)
+{
+  "memory": {
+    "family": "memory",
+    "artifact_id": "memory",
+    "revision": 10
+  },
+  "entries": [
+    {
+      "citation": {
+        "memory_ref": {
+          "family": "memory",
+          "artifact_id": "memory",
+          "revision": 10
+        },
+        "entry_id": "mem_ent_1ab3dbe5960a498e9e3e5b2a2f7d07e4",
+        "entry_version_id": "mem_ver_c3e24800a4e748fd89983f55a7ba27ff"
+      },
+      "version": 1,
+      "kind": "favor",
+      "text": "客人拎来三坛桂花酿，把上次摔碗的账认了。（原话：上次的事是我不对，我赔你三坛酒。）",
+      "state": "active",
+      "source_refs": [],
+      "artifact_refs": []
+    },
+    {
+      "citation": {
+        "memory_ref": {
+          "family": "memory",
+          "artifact_id": "memory",
+          "revision": 10
+        },
+        "entry_id": "mem_ent_5d27ac5ce9b74c9f97026ba1adf00b21",
+        "entry_version_id": "mem_ver_aade5c0e03ba43cf905d5251b39f4897"
+      },
+      "version": 1,
+      "kind": "neutral",
+      "text": "客人打听客栈开了多少年，问起掌柜的旧事。（原话：掌柜的，你这客栈开多少年了？可有旧相好？）",
+      "state": "active",
+      "source_refs": [],
+      "artifact_refs": []
+    },
+    {
+      "citation": {
+        "memory_ref": {
+          "family": "memory",
+          "artifact_id": "memory",
+          "revision": 10
+        },
+        "entry_id": "mem_ent_bde8a176a93d4698b0f9f86bf4cc5006",
+        "entry_version_id": "mem_ver_f24e389417a242488cc34e68e2ab85c5"
+      },
+      "version": 1,
+      "kind": "offense",
+      "text": "客人摔碎了柜台上一只青瓷碗，还赖着不赔。（原话：我把你柜上的青瓷碗摔了，一文不赔）",
+      "state": "active",
+      "source_refs": [],
+      "artifact_refs": []
+    },
+    {
+      "citation": {
+        "memory_ref": {
+          "family": "memory",
+          "artifact_id": "memory",
+          "revision": 10
+        },
+        "entry_id": "mem_ent_c3878a7bd17b4f7cb0f755ecd1a56567",
+        "entry_version_id": "mem_ver_6ad3fd3c50bc4a36baf50e00f2439106"
+      },
+      "version": 1,
+      "kind": "offense",
+      "text": "客人摔碎了柜台上一只青瓷碗，还赖着不赔。（原话：我又来了，上次的碗钱……）",
+      "state": "active",
+      "source_refs": [],
+      "artifact_refs": []
+    }
+  ]
+}
+## changes
+{
+  "memory": {
+    "family": "memory",
+    "artifact_id": "memory",
+    "revision": 10
+  },
+  "revisions": [
+    {
+      "memory_ref": {
+        "family": "memory",
+        "artifact_id": "memory",
+        "revision": 1
+      },
+      "changes": [
+        {
+          "op": "add",
+          "entry_id": "mem_ent_7badef90303e4851957f59ef865065de",
+          "from_entry_version_id": null,
+          "to_entry_version_id": "mem_ver_ae9263ff6a994accbf0c4d1d7ec87f0d",
+          "reason": "玩家原话：我把你柜上的青瓷碗摔了，一文不赔"
+        }
+      ]
+    },
+    {
+      "memory_ref": {
+        "family": "memory",
+        "artifact_id": "memory",
+        "revision": 2
+      },
+      "changes": [
+        {
+          "op": "add",
+          "entry_id": "mem_ent_be291b1cab934b8282df6da00ee3f78e",
+          "from_entry_version_id": null,
+          "to_entry_version_id": "mem_ver_d94843719b27436585a46608e5c99bb5",
+          "reason": "玩家原话：我又来了，上次的碗钱……"
+        }
+      ]
+    },
+    {
+      "memory_ref": {
+        "family": "memory",
+        "artifact_id": "memory",
+        "revision": 3
+      },
+      "changes": [
+        {
+          "op": "add",
+          "entry_id": "mem_ent_0fed5c7f9cee4160aa9cddad87324cec",
+          "from_entry_version_id": null,
+          "to_entry_version_id": "mem_ver_e7d4b516ff8f480b975ccb1679b766d4",
+          "reason": "玩家原话：上次的事是我不对，我赔你三坛酒。"
+        }
+      ]
+    },
+    {
+      "memory_ref": {
+        "family": "memory",
+        "artifact_id": "memory",
+        "revision": 4
+      },
+      "changes": [
+        {
+          "op": "deactivate",
+          "entry_id": "mem_ent_0fed5c7f9cee4160aa9cddad87324cec",
+          "from_entry_version_id": "mem_ver_e7d4b516ff8f480b975ccb1679b766d4",
+          "to_entry_version_id": null,
+          "reason": "reset for verification"
+        }
+      ]
+    },
+    {
+      "memory_ref": {
+        "family": "memory",
+        "artifact_id": "memory",
+        "revision": 5
+      },
+      "changes": [
+        {
+          "op": "deactivate",
+          "entry_id": "mem_ent_7badef90303e4851957f59ef865065de",
+          "from_entry_version_id": "mem_ver_ae9263ff6a994accbf0c4d1d7ec87f0d",
+          "to_entry_version_id": null,
+          "reason": "reset for verification"
+        }
+      ]
+    },
+    {
+      "memory_ref": {
+        "family": "memory",
+        "artifact_id": "memory",
+        "revision": 6
+      },
+      "changes": [
+        {
+          "op": "deactivate",
+          "entry_id": "mem_ent_be291b1cab934b8282df6da00ee3f78e",
+          "from_entry_version_id": "mem_ver_d94843719b27436585a46608e5c99bb5",
+          "to_entry_version_id": null,
+          "reason": "reset for verification"
+        }
+      ]
+    },
+    {
+      "memory_ref": {
+        "family": "memory",
+        "artifact_id": "memory",
+        "revision": 7
+      },
+      "changes": [
+        {
+          "op": "add",
+          "entry_id": "mem_ent_bde8a176a93d4698b0f9f86bf4cc5006",
+          "from_entry_version_id": null,
+          "to_entry_version_id": "mem_ver_f24e389417a242488cc34e68e2ab85c5",
+          "reason": "玩家原话：我把你柜上的青瓷碗摔了，一文不赔"
+        }
+      ]
+    },
+    {
+      "memory_ref": {
+        "family": "memory",
+        "artifact_id": "memory",
+        "revision": 8
+      },
+      "changes": [
+        {
+          "op": "add",
+          "entry_id": "mem_ent_c3878a7bd17b4f7cb0f755ecd1a56567",
+          "from_entry_version_id": null,
+          "to_entry_version_id": "mem_ver_6ad3fd3c50bc4a36baf50e00f2439106",
+          "reason": "玩家原话：我又来了，上次的碗钱……"
+        }
+      ]
+    },
+    {
+      "memory_ref": {
+        "family": "memory",
+        "artifact_id": "memory",
+        "revision": 9
+      },
+      "changes": [
+        {
+          "op": "add",
+          "entry_id": "mem_ent_1ab3dbe5960a498e9e3e5b2a2f7d07e4",
+          "from_entry_version_id": null,
+          "to_entry_version_id": "mem_ver_c3e24800a4e748fd89983f55a7ba27ff",
+          "reason": "玩家原话：上次的事是我不对，我赔你三坛酒。"
+        }
+      ]
+    },
+    {
+      "memory_ref": {
+        "family": "memory",
+        "artifact_id": "memory",
+        "revision": 10
+      },
+      "changes": [
+        {
+          "op": "add",
+          "entry_id": "mem_ent_5d27ac5ce9b74c9f97026ba1adf00b21",
+          "from_entry_version_id": null,
+          "to_entry_version_id": "mem_ver_aade5c0e03ba43cf905d5251b39f4897",
+          "reason": "玩家原话：掌柜的，你这客栈开多少年了？可有旧相好？"
+        }
+      ]
+    }
+  ]
+}

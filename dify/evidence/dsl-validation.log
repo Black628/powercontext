@@ -1,0 +1,4 @@
+DSL: dify\dsl\grudge-inn.chatflow.yml
+nodes=12 edges=11 type_counts={'start': 1, 'code': 4, 'http-request': 4, 'llm': 2, 'answer': 1}
+
+OK: 0 errors, 0 warning(s)
