@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any, Literal, TypeVar, cast
 from urllib.parse import urlsplit
 
 from pydantic import AnyHttpUrl, JsonValue, SecretStr
-from sqlalchemy import select
+from sqlalchemy import inspect, select
 from sqlalchemy.ext.asyncio import AsyncConnection
 from typing_extensions import override
 
@@ -183,7 +183,11 @@ from powercontext.builtin.runtime.extraction_diagnostics import ExtractionDiagno
 from powercontext.builtin.runtime.family_processing import FAMILY_BINDINGS, FamilyWorkerSpec, run_family_worker
 from powercontext.builtin.runtime.memory_write_gate import build_memory_write_gate
 from powercontext.builtin.runtime.models import DreamOperationCapability, MemorySearchMode, RuntimeCapabilities
-from powercontext.builtin.runtime.processing_contracts import ArtifactProcessingModelUsageDelta, WorkerEntrypoint
+from powercontext.builtin.runtime.processing_contracts import (
+    ArtifactProcessingModelUsageDelta,
+    WorkerEntrypoint,
+    WorkerInitializerPreparation,
+)
 from powercontext.builtin.runtime.processing_discovery import SourceProcessingPendingProvider, enabled_profile_scopes
 from powercontext.builtin.runtime.processing_registry import (
     canonical_processing_manifest,
@@ -519,7 +523,7 @@ async def open_builtin_runtime(
     artifact_processing_bindings: Sequence[ArtifactProcessingBinding] = (),
     worker_security: dict[str, Any] | None = None,
     processing_observer: Callable[[str, str, float], None] | None = None,
-    worker_initializer: Callable[[], None] | None = None,
+    worker_initializer: Callable[[], None] | WorkerInitializerPreparation | None = None,
     worker_entrypoint_wrapper: Callable[[WorkerEntrypoint], WorkerEntrypoint] | None = None,
     scheduled_source_runner: ScheduledSourceRunner | None = None,
     scheduled_experience_runner: ScheduledExperienceRunner | None = None,
@@ -536,9 +540,11 @@ async def open_builtin_runtime(
     An explicit ``recall_effort_sink`` replaces that recorder rather than adding
     a second observation. A disabled gate invokes neither recorder nor sink.
 
-    ``worker_initializer`` is an optional picklable bootstrap for automatically
-    composed spawn workers. Custom bindings own their launchers and initialization.
-    The default does not configure process logging.
+    ``worker_initializer`` is an optional bootstrap for automatically composed spawn
+    workers. A ``WorkerInitializerPreparation`` can own per-launch resources through
+    a context manager yielding the picklable child bootstrap. Its resources remain
+    open until spawn or cancellation cleanup finishes. Custom bindings own their
+    launchers and initialization. The default does not configure process logging.
     """
 
     async with AsyncExitStack() as resources:
@@ -935,7 +941,7 @@ def _artifact_processing_bindings(  # noqa: C901 - validate and assemble one reg
     injected_pipelines: Mapping[str, object | None] | None = None,
     injected_memory_write_gate: MemoryWriteGate | None = None,
     worker_security: dict[str, Any] | None = None,
-    worker_initializer: Callable[[], None] | None = None,
+    worker_initializer: Callable[[], None] | WorkerInitializerPreparation | None = None,
     worker_entrypoint_wrapper: Callable[[WorkerEntrypoint], WorkerEntrypoint] | None = None,
     worker_model_usage_observer: Callable[[ArtifactProcessingModelUsageDelta | None], None] | None = None,
     source_registry: SourceDefinitionRegistry = BUILTIN_SOURCE_REGISTRY,
@@ -1105,7 +1111,7 @@ async def _open_artifact_processing_supervisor(
 
 
 @asynccontextmanager
-async def open_builtin_contexts(
+async def open_builtin_contexts(  # noqa: C901 -- Backend admission and resource lifetimes stay together.
     config: BuiltinConfig,
     *,
     candidate_pipeline: CandidatePipeline | AtomicMemoryGenerationPipeline | None = None,
@@ -1148,36 +1154,54 @@ async def open_builtin_contexts(
             database,
             tables=BUILTIN_TABLES + topic_index.tables + atomic_index.tables,
             load_vector_extension=embedding_model is not None,
+            _archive_recovery=_archive_recovery,
         ) as profile:
             async with profile.database.transaction() as connection:
-                # This block is SQLite-only. Reserve SQLite's single-writer slot
-                # before startup schema reads, so concurrent Runtime openings cannot
-                # both establish a read snapshot and fail while upgrading to a write.
-                await connection.exec_driver_sql("BEGIN IMMEDIATE")
-                await bootstrap_processing_schema(connection, canonical_processing_manifest(config))
-                await assert_processing_schema_ready(connection, canonical_processing_manifest(config))
-                await ensure_skill_distribution_schema(connection)
-                await ensure_topic_memory_tag_schema(connection)
-                await ensure_scope_search_schema(connection)
-                await ensure_artifact_revision_metadata_schema(connection)
-                await ensure_portable_timestamp_precision(connection, BUILTIN_TABLES)
-                # A Topic child reuses its parent's schema. It never reads or
-                # writes Memory/Experience projections; rebuilding their FTS
-                # indexes here would take the shared SQLite write lock once
-                # per Window. Normal runtime startup retains index recovery.
-                if not _topic_memory_worker:
-                    await _initialize_atomic_memory_authority(connection)
-                    await atomic_index.initialize(connection)
+                managed = await connection.run_sync(lambda sync: inspect(sync).has_table("pc_schema_revision"))
+                if managed:
+                    # Managed startup only validates; keep one read snapshot
+                    # without reserving SQLite's writer slot.
+                    await connection.exec_driver_sql("BEGIN")
+                else:
+                    # Unmanaged bootstrap may write. Recheck after taking the
+                    # writer slot in case a concurrent initializer registered it.
+                    await connection.exec_driver_sql("BEGIN IMMEDIATE")
+                    managed = await connection.run_sync(lambda sync: inspect(sync).has_table("pc_schema_revision"))
+                if managed:
+                    await assert_processing_schema_ready(connection, canonical_processing_manifest(config))
                     await atomic_index.validate_current(connection)
-                    await refresh_lexical_projections(
-                        connection, atomic_index.table if atomic_index.table in atomic_index.tables else None
+                    await _initialize_archive_aware_topics(
+                        connection,
+                        topic_index,
+                        worker=_topic_memory_worker,
+                        recovery=_archive_recovery,
+                        validate_only=True,
                     )
-                    await ensure_artifact_head_searchable_text(connection)
-                    await assert_atomic_memory_migration_ready(connection)
-                    await experience_index.initialize(connection)
-                await _initialize_archive_aware_topics(
-                    connection, topic_index, worker=_topic_memory_worker, recovery=_archive_recovery
-                )
+                else:
+                    await bootstrap_processing_schema(connection, canonical_processing_manifest(config))
+                    await assert_processing_schema_ready(connection, canonical_processing_manifest(config))
+                    await ensure_skill_distribution_schema(connection)
+                    await ensure_topic_memory_tag_schema(connection)
+                    await ensure_scope_search_schema(connection)
+                    await ensure_artifact_revision_metadata_schema(connection)
+                    await ensure_portable_timestamp_precision(connection, BUILTIN_TABLES)
+                    # A Topic child reuses its parent's schema. It never reads or
+                    # writes Memory/Experience projections; rebuilding their FTS
+                    # indexes here would take the shared SQLite write lock once
+                    # per Window. Normal runtime startup retains index recovery.
+                    if not _topic_memory_worker:
+                        await _initialize_atomic_memory_authority(connection)
+                        await atomic_index.initialize(connection)
+                        await atomic_index.validate_current(connection)
+                        await refresh_lexical_projections(
+                            connection, atomic_index.table if atomic_index.table in atomic_index.tables else None
+                        )
+                        await ensure_artifact_head_searchable_text(connection)
+                        await assert_atomic_memory_migration_ready(connection)
+                        await experience_index.initialize(connection)
+                    await _initialize_archive_aware_topics(
+                        connection, topic_index, worker=_topic_memory_worker, recovery=_archive_recovery
+                    )
             contexts = RelationalContexts(
                 model_usage_observer=model_usage_observer,
                 database=profile.database,
@@ -1228,34 +1252,42 @@ async def open_builtin_contexts(
     atomic_index = OceanBaseAtomicMemoryIndex(None if embedding_model is None else embedding_model.profile)
     tables = BUILTIN_TABLES + topic_index.tables + atomic_index.tables
     if isinstance(database, OceanBaseConfig):
-        profile_context = OceanBaseProfile.open(database, tables=tables)
+        profile_context = OceanBaseProfile.open(database, tables=tables, _archive_recovery=_archive_recovery)
     elif isinstance(database, SeekDBConfig):
-        profile_context = SeekDBProfile.open(database, tables=tables)
+        profile_context = SeekDBProfile.open(database, tables=tables, _archive_recovery=_archive_recovery)
     else:
         raise BuiltinConfigurationError("database")
     async with profile_context as profile:
         async with profile.database.transaction() as connection:
             await ensure_supported_atomic_memory_schema(connection)
-            await bootstrap_processing_schema(connection, canonical_processing_manifest(config))
-            await assert_processing_schema_ready(connection, canonical_processing_manifest(config))
-            await ensure_skill_distribution_schema(connection)
-            await ensure_topic_memory_tag_schema(connection)
-            await ensure_scope_search_schema(connection)
-            await ensure_artifact_revision_metadata_schema(connection)
-            await ensure_portable_timestamp_precision(connection, BUILTIN_TABLES)
-            if not _topic_memory_worker:
-                await _initialize_atomic_memory_authority(connection)
-                await atomic_index.initialize(connection)
+            managed = await connection.run_sync(lambda sync: inspect(sync).has_table("pc_schema_revision"))
+            if managed:
+                await assert_processing_schema_ready(connection, canonical_processing_manifest(config))
                 await atomic_index.validate_current(connection)
-                await refresh_lexical_projections(
-                    connection, atomic_index.table if atomic_index.table in atomic_index.tables else None
+                await _initialize_archive_aware_topics(
+                    connection, topic_index, worker=_topic_memory_worker, recovery=_archive_recovery, validate_only=True
                 )
-                await ensure_artifact_head_searchable_text(connection)
-                await assert_atomic_memory_migration_ready(connection)
-                await experience_index.initialize(connection)
-            await _initialize_archive_aware_topics(
-                connection, topic_index, worker=_topic_memory_worker, recovery=_archive_recovery
-            )
+            else:
+                await bootstrap_processing_schema(connection, canonical_processing_manifest(config))
+                await assert_processing_schema_ready(connection, canonical_processing_manifest(config))
+                await ensure_skill_distribution_schema(connection)
+                await ensure_topic_memory_tag_schema(connection)
+                await ensure_scope_search_schema(connection)
+                await ensure_artifact_revision_metadata_schema(connection)
+                await ensure_portable_timestamp_precision(connection, BUILTIN_TABLES)
+                if not _topic_memory_worker:
+                    await _initialize_atomic_memory_authority(connection)
+                    await atomic_index.initialize(connection)
+                    await atomic_index.validate_current(connection)
+                    await refresh_lexical_projections(
+                        connection, atomic_index.table if atomic_index.table in atomic_index.tables else None
+                    )
+                    await ensure_artifact_head_searchable_text(connection)
+                    await assert_atomic_memory_migration_ready(connection)
+                    await experience_index.initialize(connection)
+                await _initialize_archive_aware_topics(
+                    connection, topic_index, worker=_topic_memory_worker, recovery=_archive_recovery
+                )
         contexts = RelationalContexts(
             model_usage_observer=model_usage_observer,
             database=profile.database,
@@ -1310,7 +1342,7 @@ async def _contexts_lifecycle(contexts: RelationalContexts, /, *, recovery: bool
 
 
 async def _initialize_archive_aware_topics(
-    connection: AsyncConnection, index: TopicMemoryIndex, *, worker: bool, recovery: bool
+    connection: AsyncConnection, index: TopicMemoryIndex, *, worker: bool, recovery: bool, validate_only: bool = False
 ) -> None:
     pending = await connection.scalar(
         select(PORTABLE_RESTORE_RECEIPTS_TABLE.c.bundle_id)
@@ -1320,9 +1352,21 @@ async def _initialize_archive_aware_topics(
     if pending and (not recovery or worker):
         raise BundleRecoveryRequiredError()
     if pending:
-        await index.initialize(connection)
+        if validate_only:
+            from powercontext.builtin.persistence.migrations.models import MigrationError
+            from powercontext.builtin.persistence.migrations.vector_profile import read_embedding_profile
+
+            stored = await connection.run_sync(read_embedding_profile)
+            if stored != index.capabilities.embedding_profile:
+                raise MigrationError(
+                    "embedding_profile_mismatch", "Archive recovery must use the managed vector profile."
+                )
+        else:
+            await index.initialize(connection)
     else:
-        await TopicMemoryRepository(index=index).initialize(connection, configure_retrieval_shape=not worker)
+        await TopicMemoryRepository(index=index).initialize(
+            connection, configure_retrieval_shape=not worker, validate_only=validate_only
+        )
 
 
 def _register_prompt_demonstrators(
@@ -1368,6 +1412,8 @@ async def _dream_generator(
         resources=resources,
         instrumentation=instrumentation,
         disable_provider_retries=True,
+        streaming=settings.generation_streaming,
+        stream_idle_timeout_seconds=settings.generation_stream_idle_timeout_seconds,
     )
     model_settings = cast(ModelSettings, dict(settings.generation_model_settings))
     model_settings["max_tokens"] = min(int(model_settings.get("max_tokens") or 4096), budget.max_output_tokens)
@@ -1487,6 +1533,8 @@ async def _generation_pipelines(
             headers=settings.generation_headers,
             resources=resources,
             instrumentation=instrumentation,
+            streaming=settings.generation_streaming,
+            stream_idle_timeout_seconds=settings.generation_stream_idle_timeout_seconds,
         )
         generation_request_settings = cast(ModelSettings, dict(settings.generation_model_settings)) or None
         generation_limits = InferenceLimits(
@@ -1635,6 +1683,8 @@ async def _generation_pipelines(
                 headers=rerank_headers,
                 resources=resources,
                 instrumentation=instrumentation,
+                streaming=settings.generation_streaming,
+                stream_idle_timeout_seconds=settings.generation_stream_idle_timeout_seconds,
             )
         if rerank_provider_model is not None and rerank_model is not None:
             rerank_values = (
@@ -1756,6 +1806,8 @@ async def _generation_decision(
             headers=decision_headers,
             resources=resources,
             instrumentation=instrumentation,
+            streaming=settings.generation_streaming,
+            stream_idle_timeout_seconds=settings.generation_stream_idle_timeout_seconds,
         )
     if decision_provider_model is None or decision_model is None:
         return None, None
@@ -1858,6 +1910,8 @@ async def _open_pydantic_ai_model(
     resources: AsyncExitStack,
     instrumentation: InstrumentationSettings | None,
     disable_provider_retries: bool = False,
+    streaming: Literal["auto", "disabled"] = "disabled",
+    stream_idle_timeout_seconds: float = 60.0,
 ) -> tuple[Model, Model]:
     from pydantic_ai.models import infer_model
     from pydantic_ai.models.instrumented import InstrumentedModel
@@ -1879,8 +1933,31 @@ async def _open_pydantic_ai_model(
         )
     )
     provider_model = await resources.enter_async_context(inferred_model)
-    model = provider_model if instrumentation is None else InstrumentedModel(provider_model, instrumentation)
+    model = provider_model
+    if streaming == "auto" and model_name.split(":", 1)[0] in _STREAMING_AGGREGATED_PROVIDERS:
+        # Gateways in front of non-streaming endpoints may drop idle exchanges
+        # long before the configured generation timeout; aggregate one streamed
+        # request instead. The wall-clock budget stays owned by the generator.
+        from powercontext.builtin.inference.pydantic_ai import StreamingAggregateModel
+
+        model = StreamingAggregateModel(model, idle_timeout_seconds=stream_idle_timeout_seconds)
+    elif streaming == "auto":
+        log_safely(
+            logger,
+            logging.WARNING,
+            "Streamed generation aggregation was not applied because the model provider prefix "
+            "is outside the supported set",
+            extra={
+                "event": "inference.generation.streaming_not_applied",
+                "operation": "generate",
+                "unit": "inference",
+            },
+        )
+    model = model if instrumentation is None else InstrumentedModel(model, instrumentation)
     return provider_model, model
+
+
+_STREAMING_AGGREGATED_PROVIDERS = frozenset({"anthropic", "openai", "openai-chat", "openai-responses"})
 
 
 def _provider_factory(

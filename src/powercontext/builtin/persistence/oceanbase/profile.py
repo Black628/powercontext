@@ -133,10 +133,11 @@ class OceanBaseProfile:
         config: OceanBaseConfig,
         *,
         tables: tuple[Table, ...],
+        _archive_recovery: bool = False,
     ) -> AsyncIterator[OceanBaseProfile]:
         """Create, initialize and exclusively own an official OceanBase engine."""
 
-        async with cls._connect(config, tables=tables, provision=True) as profile:
+        async with cls._connect(config, tables=tables, provision=True, _archive_recovery=_archive_recovery) as profile:
             yield profile
 
     @classmethod
@@ -160,6 +161,7 @@ class OceanBaseProfile:
         *,
         tables: tuple[Table, ...],
         provision: bool,
+        _archive_recovery: bool = False,
     ) -> AsyncIterator[OceanBaseProfile]:
         _register_official_dialect()
         url = _validate_oceanbase_url(config.url.get_secret_value())
@@ -176,7 +178,9 @@ class OceanBaseProfile:
                 )
             else:
                 await require_existing_database(engine, name=name)
-            async with _initialized_profile(cls(database=database, tables=tables)) as profile:
+            async with _initialized_profile(
+                cls(database=database, tables=tables), _archive_recovery=_archive_recovery
+            ) as profile:
                 yield profile
         finally:
             await database.close()
@@ -213,11 +217,13 @@ def _create_engine(config: OceanBaseConfig, url: URL) -> AsyncEngine:
 
 
 @asynccontextmanager
-async def _initialized_profile(profile: OceanBaseProfile) -> AsyncIterator[OceanBaseProfile]:
+async def _initialized_profile(
+    profile: OceanBaseProfile, *, _archive_recovery: bool = False
+) -> AsyncIterator[OceanBaseProfile]:
     try:
         async with profile.database.transaction() as connection:
             await _require_mysql_tenant(connection)
-        await assert_dream_schema_ready(profile.database.engine)
+        await assert_dream_schema_ready(profile.database.engine, _archive_recovery=_archive_recovery)
         if profile.tables:
             await prepare_topic_memory_recovery_schema(
                 profile.database.engine, initialize=any(table.name == BUDGET for table in profile.tables)

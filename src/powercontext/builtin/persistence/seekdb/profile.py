@@ -130,10 +130,11 @@ class SeekDBProfile:
         config: SeekDBConfig,
         *,
         tables: tuple[Table, ...],
+        _archive_recovery: bool = False,
     ) -> AsyncIterator[SeekDBProfile]:
         """Start seekdb locally and connect through its async Unix socket."""
 
-        async with cls._connect(config, tables=tables, provision=True) as profile:
+        async with cls._connect(config, tables=tables, provision=True, _archive_recovery=_archive_recovery) as profile:
             yield profile
 
     @classmethod
@@ -157,8 +158,12 @@ class SeekDBProfile:
         *,
         tables: tuple[Table, ...],
         provision: bool,
+        _archive_recovery: bool = False,
     ) -> AsyncIterator[SeekDBProfile]:
+        from powercontext.builtin.persistence.migrations.locking import assert_no_local_migration
+
         path = config.path.expanduser().resolve()
+        assert_no_local_migration(path)
         if provision:
             path.parent.mkdir(parents=True, exist_ok=True)
         else:
@@ -179,7 +184,7 @@ class SeekDBProfile:
                     )
                 else:
                     await require_existing_database(engine, name=config.database)
-                await assert_dream_schema_ready(engine)
+                await assert_dream_schema_ready(engine, _archive_recovery=_archive_recovery)
                 if tables:
                     await prepare_topic_memory_recovery_schema(
                         engine, initialize=any(table.name == BUDGET for table in tables)

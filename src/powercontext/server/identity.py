@@ -22,7 +22,7 @@ from contextlib import asynccontextmanager
 from typing import TypeVar
 from uuid import uuid4
 
-from sqlalchemy import CheckConstraint, Column, Integer, MetaData, String, Table, insert, select, update
+from sqlalchemy import CheckConstraint, Column, Integer, MetaData, String, Table, insert, inspect, select, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.schema import CreateTable
 
@@ -55,12 +55,17 @@ class ServerIdentityRepository:
         self._database = database
 
     async def initialize(self) -> None:
-        """Create the identity schema safely across concurrent initializers."""
+        """Check managed tables or safely initialize an unmanaged identity schema."""
 
         await _retry_initialization(self._initialize)
 
     async def _initialize(self) -> None:
         async with self._database.transaction() as connection:
+            if await connection.run_sync(lambda sync: inspect(sync).has_table("pc_schema_revision")):
+                # Managed profiles validate the full bundle before admission.
+                # This shared check refuses missing tables without startup DDL.
+                await create_tables(connection, (SERVER_IDENTITY_TABLE,))
+                return
             if connection.dialect.name == "mysql":
                 await create_tables(connection, (SERVER_IDENTITY_TABLE,))
             else:
