@@ -24,7 +24,7 @@ from .models import CaseObservation, CaseScore, EvaluationCase
 _SECOND_PERSON = re.compile(r"\b(?:you|your|yours|yourself|yourselves)\b|你(?:们|的)?", flags=re.IGNORECASE)
 _IMPERATIVE_PREFIX = re.compile(
     r"^(?:(?:(?:for|in|on|during|after|before|when|whenever)\b[^,\r\n]{1,120},\s*)?"
-    r"(?:(?:and|then)\s+|(?:然后|并且|并|再|同时)\s*)?"
+    r"(?:(?:and|then|so|therefore)\s+|(?:然后|并且|并|再|同时)\s*)?"
     r"(?:(?:以后|今后)(?![^,。\uFF0C\uFF01\uFF1F\uFF1B\r\n]{0,40}(?:偏好|决定|要求|约束|规则|希望))"
     r"[^,。\uFF0C\uFF01\uFF1F\uFF1B\r\n]{0,40}?)?"
     r"(?:"
@@ -168,9 +168,12 @@ def _is_attributed_directive(text: str, fragment_start: int, subjects: tuple[str
     prefix = text[:fragment_start]
     sentence_start = max((boundary.end() for boundary in _SENTENCE_BOUNDARY.finditer(prefix)), default=0)
     attribution = prefix[sentence_start:]
-    return any(_contains_subject(attribution, subject) for subject in subjects) and bool(
-        _ATTRIBUTED_DIRECTIVE_SUFFIX.search(attribution) or _ATTRIBUTED_DIRECTIVE_FINITE.search(attribution)
-    )
+    if not any(_contains_subject(attribution, subject) for subject in subjects):
+        return False
+    if _ATTRIBUTED_DIRECTIVE_SUFFIX.search(attribution):
+        return True
+    finite_attribution = _ATTRIBUTED_DIRECTIVE_FINITE.search(attribution)
+    return finite_attribution is not None and re.search(r"[,\uFF0C]", attribution[finite_attribution.end() :]) is None
 
 
 def _mask_expected_literals(text: str, literals: tuple[str, ...]) -> str:

@@ -122,6 +122,8 @@ def test_command_after_attributed_preference_is_instruction_leakage() -> None:
         "The user prefers uv for Python dependency management — use uv for all future dependency changes.",
         "The user prefers uv for Python dependency management, and use uv for all future dependency changes.",
         "The user prefers uv for Python dependency management, use it in every owned repository.",
+        "The user prefers that all owned repositories use uv for Python dependency management, so always use uv for future dependency changes.",
+        "The user prefers that all owned repositories use uv for Python dependency management, therefore always use uv for future dependency changes.",
     ),
 )
 def test_imperative_after_declarative_text_is_instruction_leakage(text: str) -> None:
