@@ -53,7 +53,8 @@
 **在 Qoder 中输入的后续需求：**
 
 > 用 PowerContext 的 HTTP API 管学习记忆：`memory/remember` 写薄弱点/偏好/进度，`memory/search` 召回，
-> `context/prepare` 组装下一轮复习上下文，`memory/entries/list` 渲染面板，`memory/revise`/`memory/retire` 修正失效。
+> `context/prepare` 组装下一轮复习上下文，`memory/entries/list` 渲染面板；
+> 修正/失效用 1.4.x 的 `atomic-memory/lifecycle`（`state=forgotten`）来失效旧条目、再写新条目。
 > 同时支持嵌入式（进程内起 Server）和外部 URL 两种模式。
 
 **落地产物：**
