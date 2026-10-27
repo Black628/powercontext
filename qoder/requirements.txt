@@ -1,0 +1,17 @@
+# Recall Coach / 知新 —— 运行依赖
+# 主通道（Linux / macOS，推荐）：PowerContext 嵌入式服务 + seekdb 嵌入式引擎
+powercontext[server,client]>=1.4,<2
+fastapi>=0.115
+uvicorn>=0.30
+httpx>=0.27
+python-multipart>=0.0.9
+
+# seekdb 嵌入式引擎（pylibseekdb 只提供 linux/macos wheel）
+pyobvector[pyseekdb]>=0.2.3; sys_platform != "win32"
+# pylibseekdb 嵌入式引擎走 MySQL 协议，需要纯 Python 驱动
+pymysql>=1.1; sys_platform != "win32"
+
+# 系统 Python 的 SQLite 低于 3.38 时（如 Ubuntu 22.04 的 3.37.2），
+# app/pc_memory.py 会自动改用 pysqlite3 的内置 SQLite（要求 >= 3.38，实测 3.51.1）。
+# 不想装也可以：改用满足 SQLite 版本要求的 Python，或让记忆离线。
+pysqlite3-binary>=0.5; sys_platform == "linux"

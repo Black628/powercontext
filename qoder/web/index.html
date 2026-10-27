@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>知新 · Recall Coach</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <h1>知新</h1>
+          <span class="latin">Recall Coach · memory-aware review</span>
+        </div>
+        <div class="chips" id="chips">
+          <span class="chip"><span class="dot"></span>正在连接…</span>
+        </div>
+      </header>
+
+      <div class="layout">
+        <!-- ========== left: materials (seekdb) ========== -->
+        <section class="panel materials">
+          <header>
+            <h2>资料库<span class="sub" id="material-sub">检索底座 · seekdb</span></h2>
+            <span class="spacer"></span>
+            <button class="ghost" id="btn-seed" title="载入内置示例笔记">载入示例</button>
+          </header>
+
+          <div class="stats" id="stats">
+            <div class="stat"><b id="stat-materials">0</b><span>笔记段</span></div>
+            <div class="stat"><b id="stat-mastery">0%</b><span>平均掌握</span></div>
+            <div class="stat"><b id="stat-reviews">0</b><span>复习次数</span></div>
+            <div class="stat"><b id="stat-weak">0</b><span>薄弱段</span></div>
+          </div>
+
+          <div class="field">
+            <label for="import-course">导入笔记（课程）</label>
+            <div class="row grow">
+              <input id="import-course" list="course-options" value="机器学习" placeholder="课程 / 科目" />
+              <datalist id="course-options"></datalist>
+            </div>
+          </div>
+          <div class="field">
+            <label for="import-title">标题</label>
+            <input id="import-title" placeholder="例如：正则化笔记" />
+          </div>
+          <div class="field">
+            <label for="import-text">正文</label>
+            <textarea id="import-text" placeholder="粘贴课程笔记、论文摘要或实验记录；长文本会自动切段。"></textarea>
+          </div>
+          <div class="row">
+            <button class="primary" id="btn-import">导入并切段</button>
+            <label class="ghost" style="padding: 7px 12px; border: 1px solid var(--line); border-radius: 9px; cursor: pointer">
+              上传 .txt / .md
+              <input type="file" id="upload-file" accept=".txt,.md,.markdown,text/plain" class="hidden" />
+            </label>
+            <span class="tiny" id="import-hint"></span>
+          </div>
+
+          <div class="field">
+            <label>已导入段落（点击课程可过滤复习范围）</label>
+            <div class="row" id="course-filter"></div>
+            <div class="material-list" id="material-list">
+              <div class="empty">还没有资料。点「载入示例」或导入一段笔记。</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ========== middle: review loop ========== -->
+        <section class="panel review">
+          <header>
+            <h2>复习<span class="sub" id="review-sub">检索决定看什么 · PowerContext 决定怎么讲</span></h2>
+            <span class="spacer"></span>
+            <button class="primary" id="btn-session">开始本轮</button>
+          </header>
+
+          <div class="field">
+            <div class="row grow">
+              <select id="session-course">
+                <option value="">全部课程</option>
+              </select>
+              <select id="session-budget">
+                <option value="5">5 张</option>
+                <option value="8" selected>8 张</option>
+                <option value="12">12 张</option>
+              </select>
+            </div>
+          </div>
+
+          <div id="review-stage" class="card-stage">
+            <div class="empty" id="review-empty">
+              点「开始本轮」：seekdb 先按语义 + 全文召回段落，PowerContext 再取出你的薄弱点与偏好来排序，
+              然后逐张考你。<br /><br />每答错一次，都会写进学习记忆；下一轮的排序与提示会随之变化。
+            </div>
+          </div>
+
+          <div class="field hidden" id="search-box">
+            <label>手动检索（验证 seekdb 混合检索）</label>
+            <div class="row grow">
+              <input id="search-input" placeholder="例如：正则化 过拟合" />
+              <button id="btn-search">检索</button>
+            </div>
+            <div class="related" id="search-results"></div>
+          </div>
+        </section>
+
+        <!-- ========== right: memory + evidence ========== -->
+        <section class="panel memory">
+          <header>
+            <h2>学习记忆<span class="sub">PowerContext</span></h2>
+            <span class="spacer"></span>
+            <button class="ghost" id="btn-memory-refresh">刷新</button>
+          </header>
+
+          <div class="field">
+            <label for="preference-input">讲解偏好（写进记忆，下一轮生效）</label>
+            <div class="row grow">
+              <input id="preference-input" placeholder="例如：先讲例子再讲定义" />
+              <button id="btn-preference">记住</button>
+            </div>
+          </div>
+
+          <div class="entries" id="memory-entries">
+            <div class="empty">PowerContext 尚未启动或还没有记忆。</div>
+          </div>
+
+          <div class="field">
+            <div class="tabs" id="evidence-tabs">
+              <button class="tab active" data-tab="store">seekdb 执行记录</button>
+              <button class="tab" data-tab="memory">PowerContext 读写</button>
+            </div>
+            <div class="trace" id="trace-list"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+    <script src="/static/app.js"></script>
+  </body>
+</html>
