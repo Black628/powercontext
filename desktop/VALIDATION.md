@@ -115,6 +115,33 @@ profile and a connection check.
 与产品 Cargo 锁文件一致。本次未运行 Tauri 图形界面、Windows／macOS 安装包、原生凭据库、
 签名、IME 或屏幕阅读器验收。
 
+#### Server 8f10c560 protocol qualification
+
+The historical preview contract is qualified by `sqlite-atomic-8f10c560-v1`. It identifies Server sources
+at `8f10c560776b32b717c3511fad9da349982a5748` and normalized OpenAPI digest
+`5878999ce9e239d6642e4da858074b281ed465629432c578b3584eec47cbce6c`.
+The qualification wheel is `powercontext-1.4.1.dev242+g8f10c5607-py3-none-any.whl`,
+SHA-256 `c771a39de6d6797efc33d406619aa02eeb7d7731f27147b3287079616709db97`.
+All 583 packaged runtime files across `powercontext/` and `powercontext_service_bootstrap/`
+match that Git commit byte for byte. The OpenAPI contract, project configuration and lock also match.
+The sorted runtime source-manifest digest is
+`d9f578a88dc9a2e0fffb3b75b9c4fba8bc245720857333c6bd6ad590e488b17c`
+(one `wheel/path sha256` entry per line, with a final newline).
+
+The existing real-Server harness passed against the isolated wheel and SQLite in all four modes:
+anonymous loopback, static Bearer, HTTPS with an explicit CA and base path, and an injected
+provider with enforced access. The ten recorded operations cover Scope selection and pagination,
+Atomic Memory save/search/exact revision reads, identity changes, same-identity revocation,
+committed writes with lost responses without replay, and independent Server survival after the
+client exits.
+
+Qualification ran on macOS 15.7.3 ARM64 with Python 3.12.13 and Rust 1.95.0, from a clean worktree
+at `8f10c560776b32b717c3511fad9da349982a5748`. The native `server_probe` was built with the unchanged
+product modules and Cargo lock. Credentials used session-only storage. This establishes the stated
+Server protocol compatibility on that host; it does not establish installed GUI workflows, native
+credential persistence, Intel or Windows execution, signing, notarization, or release qualification.
+Historical records retain their exact source, contract, wheel and platform evidence.
+
 #### Server 1da99747 protocol qualification
 
 `sqlite-atomic-1da99747-v1` qualifies Server sources at
@@ -281,6 +308,12 @@ procedure or native UI qualification for the current bundled contract.
 
 The `sqlite-atomic-d9a78567-v1` record has non-GUI protocol evidence on Linux x86_64 only.
 Native macOS save/search/exact-read and clipboard acceptance against that record remains unverified.
+
+The historical records have native protocol evidence on Windows x64 (`sqlite-atomic-1da99747-v1`)
+and macOS ARM64 (`sqlite-atomic-8f10c560-v1`). Both bind the earlier contract digest
+`5878999ce9e239d6642e4da858074b281ed465629432c578b3584eec47cbce6c`; their installed GUI and clipboard
+workflows require separate acceptance. The current `sqlite-atomic-98275dbb-v1` record establishes
+the Linux protocol scope stated above, not those native application workflows.
 
 The normal release app (without `ci-fixtures`) was operated on macOS 26.5.2 ARM64 against the
 wheel recorded under [Server caf2a35a protocol qualification](#server-caf2a35a-protocol-qualification)
