@@ -17,6 +17,42 @@ PowerContext 进程启动时从环境变量读取配置。当前工作目录存�
 `service install` 还要求该文件是当前用户拥有的普通非符号链接文件，且 group 和 other 均无访问权限。服务会记录文件
 身份；文件被替换或其 owner、权限、内容发生变化后会拒绝启动。确认修改是预期行为后，请重新执行 `service install`。
 
+## Atomic Memory
+
+创建、搜索、四态和恢复示例见[使用 Atomic Memory](../workflows/atomic-memory.md)；已有数据库的升级步骤见
+[停服迁移](atomic-memory-migration.md)。
+
+恢复预览使用显式共享签名密钥。所有可能生成或验证 token 的进程使用相同 secret 和 key ID：
+
+| 变量 | 默认值 | 含义 |
+| --- | --- | --- |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_PREVIEW_SIGNING_SECRET` | 未设置 | 至少 32 字符的机密；未设置时预览和 token 校验返回 `422 invalid_preview`，直接恢复仍可使用 |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_PREVIEW_SIGNING_KEY_ID` | `atomic-memory-v1` | 当前密钥标识，1–128 字符；部署配置只加载这一把密钥 |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_PREVIEW_TTL_SECONDS` | `300` | 预览有效期，1–3600 秒 |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_RESTORE_RETRY_BUDGET` | `3` | 无 token 恢复遇到 `atomic_memory_changed` 后重新读取和准备的次数，0–10；默认最多初次尝试加 3 次重试 |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_RELATED_MODE` | `auto` | Source 抽取的相关记忆召回：`auto`、`fts`、`vector` 或 `hybrid`；auto 在无 profile 时选 fts，有 profile 时选 hybrid |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_RELATED_MAX_DISTANCE` | `1.0` | 相关记忆向量枚举的最大精确 L2 距离，非负；不用于普通有 limit 的搜索 |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_RELATED_FTS_FALLBACK` | `false` | 显式允许相关召回在查询向量不可用、profile 不匹配或向量投影不完整时改用全文枚举；不改变普通搜索的错误处理 |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_COMPARISON_BATCH_SIZE` | `20` | 每次相关记忆判断最多比较的对象数，正整数；不是总候选上限 |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_INPUT_TOKENS_LIMIT` | `24000` | 每次抽取或判断输入的估算 token 上限，包含指令和完整输入，正整数 |
+
+未配置 secret 不会生成随机进程密钥。更换 secret 或 key ID 后，旧 token 无法验证，应重新预览。
+带 token 的恢复遇到变化会返回 `preview_stale`，不会自动重新解释意图；重试预算也不处理提交结果未知的连接失败。
+
+Source 处理先生成候选，再枚举满足权限、标签及检索资格的相关 active 记忆。fts 枚举全部合格匹配，vector 枚举
+阈值内全部结果，hybrid 合并两者。总候选不会按 comparison batch size 或 token 限额截断。
+比较输入过大时缩小单批，直到所有候选都处理完；连单个对象或完整抽取输入都超预算时窗口失败，不部分提交或推进 cursor。
+开启 fallback 会改变相关召回依据，应显式选择；默认错误会保留当前窗口供排查和重试。
+
+Atomic Memory 没有旧集合容量预算或 compact 操作。旧 `MEMORY_MAX_ACTIVE_ENTRIES`、`MEMORY_MAX_MANIFEST_ENTRIES`、
+`MEMORY_MAX_MANIFEST_BYTES` 和 `MEMORY_COMPACTION_*` 设置仍可解析，但不限制新记忆或启用压缩。
+MemoryWriteGate 采用 fail-open 策略，只裁决写入，不修改权威历史。若决策请求可能发送到 hosted 后端，必须同时设置
+`MEMORY_WRITE_GATE_PRIVACY_BOUNDARY=hosted_redacted` 和显式的 `MEMORY_WRITE_GATE_SANITIZER=known_secrets`。
+内置 sanitizer 覆盖已知的敏感环境变量/Codex 值及有限的 provider 前缀，不是通用的 PII 或口令检测器。sanitizer
+默认是 `none`；hosted-redacted 组合在未选择 sanitizer 时会以命名配置错误失败。
+Atomic Memory 的标签仍遵守每个 Artifact 最多 32 个的限制。合并输入标签的并集超过此上限时，整笔合并失败；
+Source 抽取窗口也不会部分提交或推进游标。
+
 ## 用户数据
 
 `POWERCONTEXT_HOME` 可覆盖已安装 Server 使用的数据目录：
@@ -31,23 +67,46 @@ export POWERCONTEXT_HOME=/srv/powercontext
 - macOS：`~/Library/Application Support/powercontext`；
 - Windows：`%LOCALAPPDATA%\\powercontext`。
 
-默认 SQLite 数据库是该目录下的 `powercontext.db`。后台处理器的意图与调度检查点保存在配置的数据库中。
-分布式模式下，共享 OceanBase 数据库还保存 Work Ledger 的租约与 operation 状态；
-执行路径不再使用旧的 `scheduler.db` sidecar。
+默认 SQLite 数据库是该目录下的 `powercontext.db`。后台处理器的意图与调度检查点保存在同一数据库中。
 已有部署须先完成[停机迁移](artifact-processing-migration.md)。
+
+内置 SQLite 后端要求 Python 链接的 SQLite 库（`sqlite3.sqlite_version`）为 **3.38.0 或更新版本**，
+启用 FTS5、JSON 函数，并为向量检索加载 sqlite-vec。这沿用
+[Memory 设计](../../rfcs/0014_memory_layer_design.md#sqlite-adapter)约定的后端下限，包括原生向量 `IN` 过滤能力。
+旧版本会在初始化数据库或接受写入之前被拒绝。
 
 ## Server
 
 Server 配置使用 `POWERCONTEXT_SERVER_` 前缀。
 
+每个 Server 进程默认最多接纳 64 个并发外部 HTTP 请求，包括 REST、MCP、Dashboard 和健康检查。
+从读取请求体到响应结束始终占用一个名额，流式响应同样计入。容量满时立即返回 `503`、
+错误码 `server_overloaded` 和 `Retry-After: 1`，不排队，也不读取被拒绝的请求体。异常和取消都会释放名额。
+可信的进程内 MCP 到 HTTP 转发沿用外部请求的准入，不重复计数。
+
+Server 在下游解析之前按实际收到的字节限制请求体，默认上限为 16 MiB，分块上传同样受限。
+声明的 `Content-Length` 过大会提前拒绝；缺少该头或声明较小长度都不能绕过实际字节检查。
+超限返回 `413` 和错误码 `request_too_large`，读取在首个超限 chunk 处停止。这是可配置的部署级上限，
+不改变领域字段约束。默认值可容纳当前最大 5 MiB 的 Skill archive，其 base64 最长为 6,990,508 个字符，
+并为 JSON envelope 留出空间。调低上限可能拒绝原本符合领域约束的操作。两个 HTTP 上限都必须是正整数。
+应按可用内存调整：64 个请求各保留 16 MiB，请求体本身就需要 1 GiB，尚未包括解析和业务开销。
+交给下游时会短暂复制一次已接收的请求体，随后释放输入缓冲。
+按请求来源设置速率配额、上传超时、连接上限和跨 Server 进程的总额度由反向代理负责。
+
+MCP 使用 stateless Streamable HTTP，每次工具执行都采用当前请求的认证身份，不发放传输 Session ID，
+也不保留跨请求恢复的 SSE 会话。从 stateful Server 升级后应重新连接客户端；已持久化的 Scope、Memory
+和 Handoff 数据不受影响。长响应在结束前仍占用一个 HTTP 名额，应为并发请求预留其他名额。
+
 | 变量 | 默认值 | 含义 |
 | --- | --- | --- |
 | `POWERCONTEXT_SERVER_HTTP_HOST` | `127.0.0.1` | 监听地址 |
 | `POWERCONTEXT_SERVER_HTTP_PORT` | `8000` | 监听端口；配置向导在首次设置时建议使用 `17429` |
+| `POWERCONTEXT_SERVER_HTTP_MAX_REQUEST_BODY_BYTES` | `16777216` | 解析前允许的外部 HTTP 请求体字节数，包括分块上传 |
+| `POWERCONTEXT_SERVER_HTTP_MAX_CONCURRENT_REQUESTS` | `64` | 每进程进行中的外部 HTTP 请求上限，包括完整流式响应 |
 | `POWERCONTEXT_SERVER_WORKSPACE` | Server 启动目录 | 本机项目级 Agent Skill 目录的解析根目录 |
 | `POWERCONTEXT_SERVER_MCP_ENABLED` | `true` | 启用 Streamable HTTP MCP |
 | `POWERCONTEXT_SERVER_MCP_PATH` | `/mcp` | MCP 路径 |
-| `POWERCONTEXT_SERVER_DASHBOARD_ENABLED` | `false` | 个人与演示 Dashboard；要求静态 Bearer 鉴权，不支持注入认证或授权 Provider |
+| `POWERCONTEXT_SERVER_DASHBOARD_ENABLED` | `false` | 个人与演示 Dashboard；本地 `ACCESS_MODE=disabled` 时无需 token，`enforced` 时要求静态 Bearer token；不支持注入认证或授权 Provider |
 | `POWERCONTEXT_SERVER_AUTH_ENABLED` | `false` | 旧静态 Bearer 兼容开关；`true` 自动映射为 `ACCESS_MODE=enforced`，并要求设置 `AUTH_TOKEN` |
 | `POWERCONTEXT_SERVER_AUTH_TOKEN` | 未设置 | 旧静态 Bearer token；未注入 Authentication Provider 时作为兼容认证并映射为内置管理员 |
 | `POWERCONTEXT_SERVER_ACCESS_MODE` | `disabled` | 唯一正式 Access 开关：`disabled` 或 `enforced` |
@@ -61,46 +120,37 @@ Server 配置使用 `POWERCONTEXT_SERVER_` 前缀。
 | `POWERCONTEXT_SERVER_LOGGING_LEVEL` | `INFO` | operational log 级别 |
 | `POWERCONTEXT_SERVER_LOGGING_FORMAT` | `console` | `console` 或结构化 `json` 输出 |
 | `POWERCONTEXT_SERVER_LOGGING_ACCESS` | `true` | 记录外部 HTTP 和逻辑 MCP request completion |
+| `POWERCONTEXT_SERVER_LOGGING_FILE` | `false` | 写入托管文件以替代 stdout；macOS/Windows 个人服务默认开启 |
+| `POWERCONTEXT_SERVER_LOGGING_DIRECTORY` | 用户数据目录下的 `logs/` | 托管日志目录 |
+| `POWERCONTEXT_SERVER_LOGGING_MAX_BYTES` | `20971520` | 按大小轮替的阈值，必须为正数 |
+| `POWERCONTEXT_SERVER_LOGGING_BACKUP_COUNT` | `10` | 每个活动文件最多保留的归档数，至少为一 |
+| `POWERCONTEXT_SERVER_LOGGING_COMPRESSION` | `gzip` | 归档压缩方式：`gzip` 或 `none` |
 | `POWERCONTEXT_SERVER_METRICS_ENABLED` | `true` | 在 `/metrics` 暴露 Prometheus metrics |
+| `POWERCONTEXT_SERVER_METRICS_BACKGROUND_PORT` | `8001` | Background role 的 infrastructure listener 端口；使用 `HTTP_HOST`，随 metrics 一起关闭 |
 | `POWERCONTEXT_SERVER_TRACING_ENABLED` | `false` | 启用 span recording 和 OTLP export |
 | `POWERCONTEXT_SERVER_CURSOR_SIGNING_SECRET` | 本地持久化密钥 | 用于签名 REST 分页 cursor 的共享密钥，至少 32 字节 |
 | `POWERCONTEXT_SERVER_DATABASE_KIND` | `sqlite` | 存储后端：`sqlite`、`seekdb` 或 `oceanbase` |
 | `POWERCONTEXT_SERVER_DATABASE_URL` | 用户数据目录下的 SQLite 文件 | SQLite 或 OceanBase 的 SQLAlchemy 异步 URL；seekdb 不设置 |
 | `POWERCONTEXT_SERVER_DATABASE_PATH` | 用户数据目录下的 `seekdb` 目录 | 嵌入式 seekdb 路径；仅在 `DATABASE_KIND=seekdb` 时使用 |
 | `POWERCONTEXT_SERVER_DATABASE_BUSY_TIMEOUT_MS` | `5000` | 业务连接等待 SQLite 单一写锁的毫秒数；它不约束用量记账，后者有自己的有界预算 |
-| `POWERCONTEXT_SERVER_DEPLOYMENT_MODE` | `single_node` | `single_node` 或 `distributed` 进程拓扑 |
-| `POWERCONTEXT_SERVER_DEPLOYMENT_ROLE` | `all` | `all`、`api`、`scheduler` 或 `worker`；分布式模式禁止 `all` |
-| `POWERCONTEXT_SERVER_DEPLOYMENT_ID` | `local` | 非敏感运维实例标签；启动 owner identity 仍然唯一 |
-| `POWERCONTEXT_SERVER_DEPLOYMENT_BEHAVIOR_REVISION` | `default` | 所有副本共享的非敏感发布兼容版本 |
-| `POWERCONTEXT_SERVER_COORDINATION_SCHEDULER_LEASE_SECONDS` | `30` | 使用数据库时间的 Scheduler leader lease 时长 |
-| `POWERCONTEXT_SERVER_COORDINATION_SCHEDULER_RENEW_SECONDS` | `10` | Scheduler 续租间隔；不超过 lease 的三分之一 |
-| `POWERCONTEXT_SERVER_COORDINATION_SCAN_PAGE_SIZE` | `100` | discoverer 单页最多检查的 scope 数量 |
-| `POWERCONTEXT_SERVER_COORDINATION_MEMBER_TTL_SECONDS` | `30` | Runtime member 声明有效期 |
-| `POWERCONTEXT_SERVER_COORDINATION_MEMBER_HEARTBEAT_SECONDS` | `10` | Runtime member 心跳间隔 |
-| `POWERCONTEXT_SERVER_COORDINATION_EMIT_PAYLOAD_VERSION` | `1` | 滚动发布期间发出的 Work payload version |
-| `POWERCONTEXT_SERVER_WORKER_CONCURRENCY` | `4` | 单个 Worker 并发 attempt 上限 |
-| `POWERCONTEXT_SERVER_WORKER_LEASE_SECONDS` | `120` | Worker claim lease 时长 |
-| `POWERCONTEXT_SERVER_WORKER_HEARTBEAT_SECONDS` | `30` | Claim 心跳间隔；必须小于 lease 的三分之一 |
-| `POWERCONTEXT_SERVER_WORKER_SHUTDOWN_GRACE_SECONDS` | `90` | 最大优雅 drain 时间；必须小于 lease |
-| `POWERCONTEXT_SERVER_WORKER_MAX_ATTEMPTS` | `5` | 需要 operator 恢复前的自动 attempt 上限 |
-| `POWERCONTEXT_SERVER_WORKER_RETRY_BASE_SECONDS` | `2` | full-jitter 指数退避基数 |
-| `POWERCONTEXT_SERVER_WORKER_RETRY_MAX_SECONDS` | `300` | full-jitter 退避上限 |
-| `POWERCONTEXT_SERVER_WORKER_POLL_SECONDS` | `1` | 空闲 claim 轮询间隔 |
-| `POWERCONTEXT_SERVER_OPERATIONS_DEFAULT_WAIT_SECONDS` | `10` | HTTP Memory flush 默认等待时间 |
-| `POWERCONTEXT_SERVER_OPERATIONS_MAXIMUM_WAIT_SECONDS` | `30` | `Prefer: wait=N` 最大允许值 |
-| `POWERCONTEXT_SERVER_OPERATIONS_POLL_SECONDS` | `0.2` | 本地 operation 完成轮询间隔 |
-| `POWERCONTEXT_SERVER_OPERATIONS_RETENTION_DAYS` | `30` | 成功和取消的 operation 历史保留天数 |
-| `POWERCONTEXT_SERVER_OPERATIONS_CLEANUP_BATCH_SIZE` | `500` | 单次 maintenance attempt 最大清理数量 |
-| `POWERCONTEXT_SERVER_OPERATIONS_CLEANUP_INTERVAL_SECONDS` | `3600` | 持久 maintenance discovery 间隔 |
-| `POWERCONTEXT_SERVER_RATE_LIMIT_ENABLED` | `false` | 启用数据库共享固定窗口限流 |
-| `POWERCONTEXT_SERVER_RATE_LIMIT_REQUESTS` | `120` | 每个 principal/policy 窗口允许的请求数 |
-| `POWERCONTEXT_SERVER_RATE_LIMIT_WINDOW_SECONDS` | `60` | 共享限流窗口时长 |
 | `POWERCONTEXT_SERVER_RUNTIME_SCOPE_CACHE_SIZE` | `128` | Runtime 保留的非活动 scope composition 数量；进行中的 scope 不会被驱逐 |
-| `POWERCONTEXT_SERVER_RUNTIME_SOURCE_WINDOW_LIMIT` | `100` | 单次 activation 最多处理的 Source 数量 |
+| `POWERCONTEXT_SERVER_RUNTIME_SOURCE_WINDOW_LIMIT` | `100` | 每次处理的 Source 日志位置上限；Memory 在生成超时后会缩小窗口 |
 | `POWERCONTEXT_SERVER_RUNTIME_CONTEXT_ASSEMBLY_MAX_ENTRIES` | `8` | 显式 `assembly.sections[].limit` 之和的上限；正整数，各类别单独上限仍适用 |
 | `POWERCONTEXT_SERVER_RUNTIME_MEMORY_EXTRACTION_PROFILE` | `coding` | Memory 选择策略：`coding` 或 `conversation` |
 | `POWERCONTEXT_SERVER_RUNTIME_MEMORY_RERANK_ENABLED` | `false` | 在 Memory 粗召回后应用 listwise rerank |
 | `POWERCONTEXT_SERVER_RUNTIME_MEMORY_RERANK_CANDIDATE_LIMIT` | `30` | 交给 reranker 的粗排候选池大小 |
+| `POWERCONTEXT_SERVER_RUNTIME_DECISION_ASSISTANCE_ENABLED` | `false` | 启用决策模型辅助；需要配置决策模型或 generation 模型 |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_WRITE_GATE_ENABLED` | `false` | 启用 fail-open 的 Memory 写入决策门控 |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_WRITE_GATE_HOLD_ON` | `yes` | 表示证据不足的决策结果：`yes` 或 `no` |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_WRITE_GATE_THRESHOLD` | 未设置 | 可选的 `0` 到 `1` 置信度阈值；低于阈值的暂缓方向结果会标记而非暂缓写入 |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_WRITE_GATE_PRIVACY_BOUNDARY` | `no_external_call` | 决策请求出口边界：`no_external_call` 或 `hosted_redacted` |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_WRITE_GATE_SANITIZER` | `none` | `hosted_redacted` 必须配置；选择 `known_secrets` 安装内置投影 sanitizer |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_MAX_ACTIVE_ENTRIES` | `5000` | 旧集合设置；不限制 Atomic Memory，配置仍校验不高于清单条目上限 |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_MAX_MANIFEST_ENTRIES` | `10000` | 旧集合设置；Atomic Memory 不使用集合清单 |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_MAX_MANIFEST_BYTES` | `4194304` | 旧集合设置；不限制 Atomic Memory 正文总量 |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_COMPACTION_ENABLED` | `false` | 旧集合设置；Atomic Runtime 不提供 compact |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_COMPACTION_MIN_TOMBSTONE_REVISIONS` | `10` | 旧集合设置；Atomic Runtime 不提供 compact |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_MAX_HISTORY_REVISIONS` | `100` | Runtime 读取的 Memory 历史 Revision 数量上限 |
 | `POWERCONTEXT_SERVER_RUNTIME_RECALL_GATE_ENABLED` | `false` | 启用可选的召回充分性门控；关闭时召回行为与不启用该功能时一致 |
 | `POWERCONTEXT_SERVER_RUNTIME_RECALL_GATE_MAX_ROUNDS` | `2` | 首轮召回之后最多追加的搜索轮数；取值 `0`–`2`，`0` 表示只评估、不追加 |
 | `POWERCONTEXT_SERVER_RUNTIME_RECALL_GATE_MIN_CANDIDATES` | `2` | 判定召回充分所需的最少候选数量 |
@@ -110,6 +160,9 @@ Server 配置使用 `POWERCONTEXT_SERVER_` 前缀。
 | `POWERCONTEXT_SERVER_RUNTIME_RECALL_GATE_ROUND1_MIN_SEMANTIC_SIMILARITY` | `0.15` | 第一轮追加搜索使用的语义相似度准入下限；启用时不得高于首轮的 `0.3` |
 | `POWERCONTEXT_SERVER_RUNTIME_RECALL_GATE_ROUND2_MIN_SEMANTIC_SIMILARITY` | `0.10` | 第二轮追加搜索使用的语义相似度准入下限；启用时不得高于第一轮的值 |
 | `POWERCONTEXT_SERVER_RUNTIME_RECALL_GATE_ALLOW_WITH_RERANK` | `false` | 已启用 `MEMORY_RERANK_ENABLED` 时是否仍允许追加搜索；默认在 rerank 之后不再追加 |
+| `POWERCONTEXT_SERVER_RUNTIME_RECALL_FTS_WEIGHT` | `1.0` | hybrid Atomic Memory 和 Topic Memory RRF 中 FTS 的相对贡献；`0` 会从 hybrid 结果中排除仅命中 FTS 的候选 |
+| `POWERCONTEXT_SERVER_RUNTIME_RECALL_VECTOR_WEIGHT` | `1.0` | hybrid Atomic Memory 和 Topic Memory RRF 中 vector 的相对贡献；`0` 会从 hybrid 结果中排除仅命中 vector 的候选 |
+| `POWERCONTEXT_SERVER_RUNTIME_RECALL_EMBEDDING_TIMEOUT_SECONDS` | `0.25` | 一次上下文准备里每次 Atomic Memory 或 Topic Memory 检索等待查询 embedding 的秒数，上限 `60`。准备会依次检索该 Scope 及其每个 context reference，等待时间会累加。某次等待超时后，该次检索只用词法匹配继续，并记录 `memory.search.embedding_fallback` 或 `topic_memory.search.embedding_fallback`。远程 embedding 提供商需要比默认值更长的时间；累计等待应控制在宿主 Hook 请求超时之内，多数宿主为 3 秒 |
 | `POWERCONTEXT_SERVER_RUNTIME_MEMORY_SCHEDULE_SECONDS` | 未设置 | Memory 自动准入间隔；`SCHEDULE_SECONDS` 保留为兼容别名 |
 | `POWERCONTEXT_SERVER_RUNTIME_TOPIC_MEMORY_SCHEDULE_SECONDS` | 未设置 | Topic Memory 自动准入间隔；未设置时不接纳新的自动调用 |
 | `POWERCONTEXT_SERVER_RUNTIME_TOPIC_MEMORY_SOURCE_WINDOW_LIMIT` | `10` | 每个 Topic Memory Window 的 Source 数量上限，硬上限为 100；一次 Scope 调用可完成多个 Window |
@@ -118,7 +171,7 @@ Server 配置使用 `POWERCONTEXT_SERVER_` 前缀。
 | `POWERCONTEXT_SERVER_RUNTIME_TOPIC_MEMORY_HISTORY_MIN_CANDIDATES` | `5` | 达到阈值的候选过少时保证的最小历史召回数 |
 | `POWERCONTEXT_SERVER_RUNTIME_TOPIC_MEMORY_MAX_WORKERS` | `10` | Topic 独立 Worker 额度；`ARTIFACT_PROCESSING_MAX_WORKERS` 是其兼容别名 |
 | `POWERCONTEXT_SERVER_RUNTIME_TOPIC_MEMORY_WORKER_TIMEOUT_SECONDS` | `600` | 包括启动的 Scope 调用总超时；旧 `ARTIFACT_PROCESSING_WORKER_TIMEOUT_SECONDS` 是其兼容别名 |
-| `POWERCONTEXT_SERVER_RUNTIME_ARTIFACT_PROCESSING_ROLE` | `all` | 单机 Supervisor 角色：`all`、`api` 或 `background`；分布式模式由 `DEPLOYMENT_ROLE` 拆分进程，因此此项必须为 `all` |
+| `POWERCONTEXT_SERVER_RUNTIME_ARTIFACT_PROCESSING_ROLE` | `all` | 进程角色：`all`、`api` 或 `background` |
 | `POWERCONTEXT_SERVER_RUNTIME_ARTIFACT_PROCESSING_SUPERVISOR_MODE` | `global` | `global` 一条 Lease；`dedicated` 每个注册 Family 一条 Lease |
 | `POWERCONTEXT_SERVER_RUNTIME_ARTIFACT_PROCESSING_FAMILIES` | 根据模型推导 | JSON Family 列表；API 端可无模型凭据地声明处理能力 |
 | `POWERCONTEXT_SERVER_RUNTIME_MEMORY_MAX_WORKERS` | `1` | Memory 独立 Worker 额度 |
@@ -142,6 +195,8 @@ Server 配置使用 `POWERCONTEXT_SERVER_` 前缀。
 | `POWERCONTEXT_SERVER_INFERENCE_GENERATION_MODEL_SETTINGS` | `{}` | Pydantic AI generation model settings JSON object |
 | `POWERCONTEXT_SERVER_INFERENCE_GENERATION_TIMEOUT_SECONDS` | `30` | 单次结构化 generation 操作的超时秒数 |
 | `POWERCONTEXT_SERVER_INFERENCE_GENERATION_MAX_REQUESTS` | `2` | 单次结构化 generation 操作最多发起的 provider 请求数，包含重试 |
+| `POWERCONTEXT_SERVER_INFERENCE_GENERATION_STREAMING` | `disabled` | `auto` 时，仅模型名前缀为 `anthropic`、`openai`、`openai-chat`、`openai-responses` 的 generation 模型改用流式请求并在本地聚合为完整响应。其他前缀仍走非流式。`disabled` 时全部保持非流式请求 |
+| `POWERCONTEXT_SERVER_INFERENCE_GENERATION_STREAM_IDLE_TIMEOUT_SECONDS` | `60` | 流式聚合时的最大空闲秒数：覆盖等待流建立并收到首个模型事件，以及相邻模型事件（正文、思考、工具调用）之间的间隔。供应商心跳不重置这个计时，超过即按超时处理 |
 | `POWERCONTEXT_SERVER_INFERENCE_GENERATION_MODEL_CONTEXT_WINDOW_TOKENS` | `125000` | Topic 处理预算使用的 generation model 总上下文窗口 |
 | `POWERCONTEXT_SERVER_INFERENCE_EMBEDDING_MODEL` | 未设置 | Pydantic AI embedding model；必须同时设置 profile ID 和 dimension |
 | `POWERCONTEXT_SERVER_INFERENCE_EMBEDDING_BASE_URL` | provider 默认值 | 自定义 OpenAI-compatible embeddings base URL |
@@ -159,13 +214,40 @@ Server 配置使用 `POWERCONTEXT_SERVER_` 前缀。
 | `POWERCONTEXT_SERVER_INFERENCE_RERANK_MODEL_SETTINGS` | `{}` | Pydantic AI reranker model settings JSON object |
 | `POWERCONTEXT_SERVER_INFERENCE_RERANK_TIMEOUT_SECONDS` | generation 超时 | LLM reranker 超时 |
 | `POWERCONTEXT_SERVER_INFERENCE_RERANK_MAX_REQUESTS` | generation request limit | 单次 rerank operation 的最大 model request 数量 |
+| `POWERCONTEXT_SERVER_INFERENCE_DECISION_MODEL` | generation model | 用于决策辅助和 Memory 写入门控的可选独立 Pydantic AI 模型 |
+| `POWERCONTEXT_SERVER_INFERENCE_DECISION_BASE_URL` | 继承值或 provider 默认值 | 自定义决策模型 provider base URL；须同时设置 `DECISION_MODEL` |
+| `POWERCONTEXT_SERVER_INFERENCE_DECISION_HEADERS` | `{}` | 决策模型客户端静态 header 的 JSON object；值按 secret 处理，未设置独立模型时继承 generation headers |
+| `POWERCONTEXT_SERVER_INFERENCE_DECISION_MODEL_SETTINGS` | `{}` | 决策模型设置的 JSON object；未设置独立模型时与 generation settings 合并 |
+| `POWERCONTEXT_SERVER_INFERENCE_DECISION_TIMEOUT_SECONDS` | generation 超时 | 单次决策操作的超时秒数 |
+| `POWERCONTEXT_SERVER_INFERENCE_DECISION_MAX_REQUESTS` | generation request limit | 单次决策操作的模型请求次数上限，包含模型输出校验重试；不包含 provider SDK 的 HTTP 重试 |
 | `POWERCONTEXT_SERVER_RUNTIME_EXPERIENCE_SCHEDULE_SECONDS` | 未设置 | Experience 自动准入间隔；未设置时保留已接受工作，停止新的自动准入 |
 | `POWERCONTEXT_SERVER_EXTERNAL_SKILLS` | 自动生成本机项目 target | 覆盖默认值的 host identity 和显式 Agent Skill targets JSON object |
+
+召回通道权重表示相对比例，应用于 Atomic Memory 和 Topic Memory，只在 hybrid 候选通过各通道准入下限后生效。
+单通道搜索保持无权重行为；`auto` 只有在选择 hybrid 搜索时才应用权重。Atomic Memory 的 `matched_by` 和 recall gate
+相关度不包含零权重通道；Topic Memory 则为正权重通道选中的 Topic 保留零权重通道的证据。
+同比例缩放两个值不会改变结果。将其中一个设为
+`0` 会从 hybrid 融合中排除该通道，但提高权重不能恢复融合前已被拒绝的候选。零权重不会关闭该通道的检索和准入工作：
+vector 查询仍可能生成 embedding，检索与准入计数也仍包含零权重通道。如果 Topic 或 Atomic Memory Artifact 搜索请求显式提供自己的 `fusion`
+参数，它会完整取代部署级召回权重；只有请求未指定 `fusion` 时，部署级权重才生效。归一化后，每个非零通道权重必须不低于 IEEE 754 binary64
+最小正规数（`2.2250738585072014e-308`），更小的值会在启动时被拒绝。只有显式配置 `0` 才表示关闭该通道的融合贡献。调整权重时应同时评估
+recall gate 轮次、语义准入下限和历史 Topic 候选选择，不要将这些配置孤立调整。特别是，提高 FTS 权重可能使 Topic 的归一化分数跨过
+`POWERCONTEXT_SERVER_RUNTIME_TOPIC_MEMORY_HISTORY_RRF_THRESHOLD`（默认为 `70`），从而改变传给规划器的历史 Topic 集合。
 
 召回充分性门控默认关闭。启用后，Runtime 在 `prepare_context` 阶段评估首轮候选的数量、来源家族覆盖、最优候选分数和词法
 覆盖；判定为不足时最多追加两轮搜索，并在每轮放宽候选准入的语义相似度下限。门控判断本身不调用模型，追加轮次沿用同一请求的
 Scope、家族、条数限制和上下文预算，并复用已经生成的查询向量。第一轮和第二轮的语义相似度下限必须保持递减顺序，违反该顺序
 会导致启动失败。启用后可能增加检索次数和延迟，请在自己的数据上评估召回结果和延迟变化。
+
+门控产生 `RecallEffort` 时，关系型 Runtime 向 `pc_recall_effort_daily` 累加一次观测，主键为
+`(scope_id, usage_date, policy_id, assessment)`，日期使用 UTC。计数包含已提交的搜索轮数、扩展动作、候选池大小、
+搜索报告的额外推理调用，以及最终字节预算造成的截断和丢弃。两个丢弃子类之和等于 `dropped_items`，非法计数在写库前拒绝。
+表中只保存主键维度和计数，不包含条目身份、查询、提示词、引用或正文。该聚合仅供内部使用，不进入统计概览或 HTTP/MCP 响应。
+
+召回工作量记录在 `POWERCONTEXT_SERVER_RUNTIME_MODEL_USAGE_WRITE_TIMEOUT_SECONDS` 预算内只尝试一次写入。
+写入失败时记录安全诊断，保持已经准备好的上下文。请求取消会等待该事务完成原生清理后再传播，保护共享的内存 SQLite 数据库。
+调用方显式传入的 `recall_effort_sink` 替代关系型记录器；关闭门控时两者都不调用。已有 SQLite 和 OceanBase 数据库通过正常的
+增量建表路径补建缺失的关系表。
 
 模型用量记账是尽力而为的，且永不阻塞模型调用。每个 Runtime 拥有一个有界记账器：接收记录时不产生任何 I/O，随后在独立的短事务
 中写入。因此统计故障、队列写满，或超出该记录自身预算的锁等待，只会丢弃该条记录并留下诊断日志，而不会让产生它的操作失败。
@@ -229,9 +311,31 @@ SQLite 使用 `all`。Dream 的模型标识在首次执行时固定，关闭自�
 `ARTIFACT_PROCESSING_FAMILIES=[]` 关闭内置后台 Family；否则启动在接受工作前失败。
 仅关闭 schedule 不足以满足要求，因为显式请求仍会启动 Worker。同步 SDK Context 和纯 API 组合仍支持自定义 Source Registry。
 
-受鉴权保护的 `/metrics` 暴露 `powercontext_server_artifact_processing_*` 指标，只使用 `family` 标签，涵盖 Worker 额度、
+受鉴权保护的 `/metrics` 暴露 `powercontext_server_artifact_processing_*` 指标，使用有界的 `family` 标签，并按需增加
+`state`、`outcome`、`category` 或 `reason`，涵盖 Worker 额度、
 ready/retry 队列、未确认 Scope 数、发现与调用耗时，以及完成、失败、超时次数。未确认数反映最近一次发现结果；计数器随
-Supervisor 实例重建而重置。
+Supervisor 实例重建而重置。新鲜度、状态、attempt/确认与告警语义参见[日志、指标与 Tracing](observability.md)。
+
+`GET /v1/capabilities` 的 `extraction` 对象分别返回配置、后台执行状态和本地观察记录。
+读取快照不查询数据库、不调用模型，也不生成整个管道的健康结论。
+`powercontext capabilities` 会打印同样的事实。缺少诊断时输出 `unavailable`，Supervisor 角色为空时输出 `absent`，未知值输出
+`unknown`。成功和失败时间是历史观察，不是当前健康结论。`--json` 仍原样返回 Server 响应。
+
+- `configuration` 在本地已装配提取模型、自定义管道或已注册本地 Memory worker 时为 `configured`，
+  均不可用时为 `unconfigured`。注册不验证凭证或连通性；外部执行返回 `unknown`。
+- `background.location` 为 `local`、`external` 或 `none`。本地 Supervisor 的 `role`（`leader` 或 `standby`）
+  与 `state`（`running`、`degraded` 或 `stopped`）独立，standby 属于正常状态。Worker 崩溃时，Supervisor
+  仍可能正常运行并安排重试。`automatic_processing_enabled=false` 仍允许显式处理请求。
+  外部执行的运行状态和调度配置未知；没有运行中的本地 Supervisor 时，role 为 null。
+- `observation.since` 标记本次 Runtime 本地观察窗口的起点，包含其 Memory 子进程。
+  `status=unverified` 表示尚未观察到执行结果或控制故障，`observed` 表示已有记录。
+  `last_success_at` 记录成功的非空 flush 或已确认的 Worker 调用；`last_failure` 记录安全的
+  `code`、`stage` 和 `occurred_at`，例如 `inference` 阶段的 `model_timeout` 或 `worker` 阶段的 `worker_crash`。
+  通用错误保留观察到故障的边界（`flush` 或 `worker`），不推断为模型故障。
+
+成功与失败记录独立：Scope B 成功不会清除 Scope A 的失败，也不证明 A 已恢复。
+历史失败同样不表示故障仍未解决。观察记录在 Runtime 重启后清空，不证明模型连通性或远端 Worker 健康。
+通过结构化日志定位具体 Scope 的失败与重试，通过现有指标观察队列和处理进度；本地 ready 数不代表全局 Source 积压量。
 
 远程和多用户部署必须使用 `enforced`。此模式下，HTTP、MCP 和 metrics 共用同一个 Server PEP。`/v1/access/me` 返回
 `server`/`scope`/`artifact` Resource Kind、Provider 的 batch/list/relationship 能力与 Family profile。Managed Skill 的
@@ -291,20 +395,19 @@ Server 级 Bearer token 时可达。部署条件允许时，应优先启用鉴�
 Handoff Report API route 独立默认启用。Selection、检查和导出步骤见
 [使用 Handoff Report](../workflows/use-handoff-report.md)。
 
-在 `single_node` 部署模式中，默认 `all` 角色会启动 Artifact Processing Supervisor。单机 OceanBase 部署可以再把
-Supervisor 拆成 `api` 和 `background` runtime 角色；`powercontext server run --role background` 不启动 HTTP、MCP 或
-Dashboard listener，多个后台候选者通过数据库 Lease 自动选出一个 active Leader。这种拆分不同于
-`POWERCONTEXT_SERVER_DEPLOYMENT_MODE=distributed`：后者由 `DEPLOYMENT_ROLE` 选择 `api`、`scheduler` 或 `worker`，
-并要求 `ARTIFACT_PROCESSING_ROLE` 保持为 `all`。
-
-单机模式下 Memory、Topic Memory、Experience、Profile 使用统一 Supervisor；分布式模式下 Memory、Experience、
-Profile 改由 Work Ledger 执行。分布式 v1 不支持 Topic Memory processing，配置其周期会在启动时被拒绝。SQLite 与
-嵌入式 seekdb 只支持单进程 `all`。未设置正数间隔时，Topic Memory 自动波次保持关闭；显式 flush 工作的恢复不依赖
-该间隔。Topic Worker 要求使用文件 SQLite；内存 SQLite 配合 generation model 的配置会在声明处理能力之前被拒绝。
-请通过 `POWERCONTEXT_SERVER_DATABASE_URL` 指定持久数据库路径，例如
-`sqlite+aiosqlite:////srv/powercontext/runtime.db`。Supervisor 的每个 Family 保留独立额度和总超时，不借用其他 Family
-空闲额度。关闭自动准入仍恢复已接受请求。拆分的 Supervisor API 与后台须保持 mode、注册 Family 和可触发能力一致；
-模型仅在执行进程必需。切换 Supervisor mode 须[协调停机迁移](artifact-processing-migration.md)，不能混用模式启动。
+默认 `all` 角色会启动 Artifact Processing Supervisor。OceanBase 部署可以拆分 `api` 和 `background`；
+`powercontext server run --role background` 在启用指标时提供 `/metrics` 和公开的 `/health/live`，使用
+`POWERCONTEXT_SERVER_HTTP_HOST` 和 `POWERCONTEXT_SERVER_METRICS_BACKGROUND_PORT`（默认 `8001`），
+不提供业务 API、MCP、Dashboard、OpenAPI 或 `/health/ready`。
+`/metrics` 使用与 API 宿主相同的认证及 `server.observe` 授权。同机 API 与后台进程应使用不同端口。
+`POWERCONTEXT_SERVER_METRICS_ENABLED=false` 时后台不打开 listener。多个后台候选者通过数据库 Lease
+自动选出一个 active Leader。SQLite 与嵌入式 seekdb 只支持单进程 `all`。未设置正数间隔时，Topic Memory 自动波次
+保持关闭；显式 flush 工作的恢复不依赖该间隔。Topic Worker 要求使用文件 SQLite；内存 SQLite 配合 generation
+model 的配置会在声明处理能力之前被拒绝。请通过 `POWERCONTEXT_SERVER_DATABASE_URL` 指定持久数据库路径，例如
+`sqlite+aiosqlite:////srv/powercontext/runtime.db`。Memory、Topic Memory、Experience、Profile 均使用统一 Supervisor，OceanBase 拆分角色也可启用其周期。
+SQLite 和 embedded seekdb 仍要求单宿主 `all`。两模式均保留逐 Family 独立额度和总超时，不借用其他 Family 空闲额度。
+关闭自动准入仍恢复已接受请求。API 与后台须保持 mode、注册 Family 和可触发能力一致；模型仅在执行端必需。
+切换模式须[协调停机迁移](artifact-processing-migration.md)，不能混用模式启动。
 显式同时配置的新旧别名值不同时拒绝启动，同值接受。
 
 普通 Runtime 启动会初始化并恢复所配置的检索索引。Topic Worker 复用该数据库，不再为每个 Window 重建无关的
@@ -358,6 +461,15 @@ search request 最终 `limit` 的结果。它不会修改已存储 Memory 或索
 settings。设置 `POWERCONTEXT_SERVER_INFERENCE_RERANK_MODEL` 后，该 LLM operation 可以使用独立的 model、base URL、
 headers、settings、timeout 和 request limit。
 
+Python 部署可以把可选的 `JevMemoryReranker` 通过
+`open_builtin_runtime(memory_reranker=...)` 注入 Runtime，使用 `JevRerankConfig`
+配置独立 API key、System One endpoint 和固定模型版本，例如 `jev-1.13.0`，并由调用方管理
+HTTPX client。适配器限制整个操作的时限、并发数和请求大小；超时、Provider 不可用、无效分数、
+缺少用量回执和模型版本不符均按 RFC 0080 显式返回 inference error。
+注入的 reranker 默认也会关闭召回扩展，只有现有 `RECALL_GATE_ALLOW_WITH_RERANK`
+配置显式允许时才扩展。上面的 Server 环境变量开关仍选择现有 LLM reranker。
+Jev 配置、三组对照评估与实际验证范围见仓库中的 `evaluation/memory/locomo/README.md`。
+
 同一个 generation model 也控制显式 Experience generation、managed Skill generation，以及语义化的 Skill
 fork/evolution。External Skill 精确导入和完整 package 上传不使用模型：PowerContext 会校验并保存 canonical package
 bytes，再创建 package digest 完全相同的 pending Candidate。未配置模型时，语义生成会在持久化 Candidate 前返回
@@ -366,20 +478,8 @@ capability error；Review、package 检查与下载、精确导入、usage recor
 Experience 孵化使用独立的 Supervisor binding 和持久化 Source cursor。每次调用按 `SOURCE_WINDOW_LIMIT` 检查有限 Source 窗口，只把 metadata 包含 `"kind": "task-outcome"` 的 Content Source
 暴露给模型。该 job 会在 Review Inbox 中创建 pending Experience Candidate；它不会自动批准、进入
 PreparedContext、创建 managed Skill、将它导出到 Agent target 或执行任何内容。Memory 与 Experience 保持独立的周期、
-Worker 额度和业务 Cursor。分布式模式下，它们接受的 operation 使用相互独立的 Work Ledger lane 和 logical key。
-关闭某一间隔仅停止该 Family 的新自动准入，保留已接受工作。
+Worker 额度和业务 Cursor；关闭某一间隔仅停止该 Family 的新自动准入，保留已接受工作。
 设置与验证步骤见[创建并审核 Experience](../workflows/create-and-review-experience.md)。
-
-### 分布式角色与迁移
-
-分布式模式要求 OceanBase。启动任何角色前，先使用有 DDL 权限的账号执行
-`powercontext server migrate --env-file ...`；角色进程不会创建或修改 schema。升级顺序固定为 migrate、Worker、
-Scheduler、API。当一次发布改变了不能混部的非敏感行为时，应为所有新副本设置新的
-`POWERCONTEXT_SERVER_DEPLOYMENT_BEHAVIOR_REVISION`。
-
-Scheduler 或 Worker member 缺失时，API 仍可接受持久任务和读取请求，但 readiness 会是 `degraded` 并标出缺失角色。
-Scheduler 与 Worker 角色只暴露 health 和 metrics。分布式 MCP 为 stateless，不需要负载均衡粘性。由于不同副本可能
-返回不同结果，分布式模式会拒绝 host-local External Skill target。
 
 ### Agent Skill 目标
 

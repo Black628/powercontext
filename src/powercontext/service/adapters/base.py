@@ -68,6 +68,12 @@ class NativeServiceAdapter(Protocol):
 
     def disable(self) -> None: ...
 
+    def suspend(self, marker: Path) -> None: ...
+
+    def resume(self) -> None: ...
+
+    def update_suspended(self) -> None: ...
+
     def remove(self) -> None: ...
 
     def manager_state(self) -> ManagerState: ...
@@ -119,6 +125,15 @@ class UnsupportedAdapter:
         raise ServiceError(self._detail)
 
     def disable(self) -> None:
+        raise ServiceError(self._detail)
+
+    def suspend(self, marker: Path) -> None:
+        raise ServiceError(self._detail)
+
+    def resume(self) -> None:
+        raise ServiceError(self._detail)
+
+    def update_suspended(self) -> None:
         raise ServiceError(self._detail)
 
     def remove(self) -> None:
@@ -207,14 +222,14 @@ def definition_state(
     return DefinitionState.CURRENT
 
 
-def service_python_executable() -> str:
+def service_python_executable(*, require_exists: bool = True) -> str:
     """Return the Python executable suitable for a native personal service."""
 
     executable = os.path.abspath(sys.executable)
     if sys.platform != "win32":
         return executable
     pythonw = Path(executable).with_name("pythonw.exe")
-    if not pythonw.is_file():
+    if require_exists and not pythonw.is_file():
         raise ServiceError(  # noqa: TRY003
             f"Windows personal services require pythonw.exe beside the active Python executable: {pythonw}",
             exit_code=2,

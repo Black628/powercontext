@@ -34,8 +34,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from typing_extensions import override
 
 from powercontext.builtin.persistence.database import AsyncDatabase
+from powercontext.builtin.persistence.dream_schema import assert_dream_schema_ready
 from powercontext.builtin.persistence.errors import PersistenceError
 from powercontext.builtin.persistence.schema import create_tables
+from powercontext.builtin.persistence.topic_memory_recovery_schema import BUDGET, prepare_topic_memory_recovery_schema
 
 _DIALECT_DRIVER = "mysql+aseekdb"
 _DIALECT_REGISTRY_NAME = "mysql.aseekdb"
@@ -108,10 +110,14 @@ class SeekDBProfile:
         *,
         tables: tuple[Table, ...],
         create_schema: bool = True,
+        _archive_recovery: bool = False,
     ) -> AsyncIterator[SeekDBProfile]:
         """Start seekdb locally and connect through its async Unix socket."""
 
+        from powercontext.builtin.persistence.migrations.locking import assert_no_local_migration
+
         path = config.path.expanduser().resolve()
+        assert_no_local_migration(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         module = _load_binding()
         instance = await _open_instance(module, path)
@@ -120,6 +126,11 @@ class SeekDBProfile:
             database = AsyncDatabase.own(engine)
             profile = cls(database=database, tables=tables, connection_options=instance.connection_options())
             try:
+                await assert_dream_schema_ready(engine, _archive_recovery=_archive_recovery)
+                if tables:
+                    await prepare_topic_memory_recovery_schema(
+                        engine, initialize=any(table.name == BUDGET for table in tables)
+                    )
                 if create_schema:
                     async with database.transaction() as connection:
                         await create_tables(connection, tables)

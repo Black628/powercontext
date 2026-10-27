@@ -25,11 +25,10 @@ from powercontext.builtin.artifacts.experience import ExperienceContent
 from powercontext.builtin.code import CodeConfig, CodeRepositoryConfig, CodeService
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
 from powercontext.builtin.runtime import (
-    ApproveArtifactCandidateRequest,
+    ApproveCandidateRequest,
     BuiltinConfig,
     CaptureSource,
     ProposeExperienceRequest,
-    SearchMemoryRequest,
     open_builtin_runtime,
 )
 from powercontext.builtin.scope import ScopeDraft
@@ -59,6 +58,15 @@ def test_http_code_prepare_preserves_approved_experience_when_memory_is_empty(tm
     lesson = "Budget preparation must preserve approved historical evidence."
 
     async def exercise():
+        bootstrap = create_server_app(
+            settings=ServerSettings(
+                database=database, mcp=McpConfig(enabled=False), metrics=MetricsConfig(enabled=False)
+            ),
+            scheduler_path=tmp_path / "bootstrap-scheduler.db",
+        )
+        # Initialize Server-owned storage before seeding it through the SDK.
+        async with bootstrap.router.lifespan_context(bootstrap):
+            pass
         async with open_builtin_runtime(
             BuiltinConfig(database=database), scheduler_path=tmp_path / "runtime-scheduler.db"
         ) as runtime:
@@ -85,10 +93,11 @@ def test_http_code_prepare_preserves_approved_experience_when_memory_is_empty(tm
                 )
             )
             approved = await runtime.review.for_scope(scope.scope_id).approve(
-                ApproveArtifactCandidateRequest(candidate_id=candidate.candidate_id, expected_version=candidate.version)
+                ApproveCandidateRequest(candidate_id=candidate.candidate_id, expected_version=candidate.version)
             )
             assert approved.result_artifact is not None
-            memory = await runtime.memory.for_scope(scope.scope_id).search(SearchMemoryRequest(query="budget"))
+            assert runtime.atomic_memory is not None
+            memory = await runtime.atomic_memory.for_scope(scope.scope_id).search("budget")
             assert memory.hits == ()
 
         code = CodeConfig(

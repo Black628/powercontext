@@ -22,7 +22,7 @@ from typing import Any, ClassVar
 import pytest
 from pydantic_ai import Embedder
 
-from powercontext.builtin.artifacts.memory import EmbeddingProfile, MemoryEntryInput
+from powercontext.builtin.artifacts.memory import EmbeddingProfile
 from powercontext.builtin.artifacts.topic_memory import (
     TopicMemoryCapabilityError,
     TopicMemoryContent,
@@ -30,7 +30,9 @@ from powercontext.builtin.artifacts.topic_memory import (
     prepare_topic_memory_projection,
 )
 from powercontext.builtin.inference import EmbeddingResult
+from powercontext.builtin.persistence.atomic_memory_index import AtomicMemoryIndexError
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
+from powercontext.builtin.records import ArtifactWrite
 from powercontext.builtin.runtime import BuiltinConfig, open_builtin_contexts
 from powercontext.builtin.runtime.composition import _embedding_models
 from powercontext.builtin.runtime.config import InferenceConfig
@@ -111,7 +113,9 @@ def test_embedding_models_without_configuration_return_no_models() -> None:
 
 
 @pytest.mark.parametrize("existing_memory", [False, True])
-def test_empty_topic_database_allows_embedding_configuration_changes(tmp_path: Path, existing_memory: bool) -> None:
+def test_embedding_configuration_changes_respect_each_family_projection_lifecycle(
+    tmp_path: Path, existing_memory: bool
+) -> None:
     class Embedding:
         def __init__(self, profile_id: str) -> None:
             self.profile = EmbeddingProfile(
@@ -126,24 +130,27 @@ def test_empty_topic_database_allows_embedding_configuration_changes(tmp_path: P
         memory = None
         async with open_builtin_contexts(config) as contexts:
             if existing_memory:
-                context = await contexts.get("project")
-                memory = await context.artifacts.memory.remember(
-                    memory=None,
-                    entries=(MemoryEntryInput(kind="decision", text="Preserve ordinary Memory."),),
-                    mode="append",
+                memory = await contexts.records.create_artifact(
+                    "project",
+                    "atomic-memory",
+                    ArtifactWrite(content={"kind": "decision", "text": "Preserve ordinary Memory."}),
                 )
 
-        # Reopening an unused Topic store must not lock out ordinary Memory
-        # embeddings, disabling embeddings, or changing a compatible profile.
+        # An empty Topic store imposes no profile lock. Existing Atomic rows
+        # without vectors require offline rebuilding before enabling embeddings.
         for embedding in (Embedding("first"), Embedding("second"), None, Embedding("third")):
+            if existing_memory and embedding is not None:
+                with pytest.raises(AtomicMemoryIndexError, match="rebuild-projection"):
+                    async with open_builtin_contexts(config, embedding_model=embedding):
+                        pass
+                continue
             async with open_builtin_contexts(config, embedding_model=embedding) as contexts:
-                assert contexts.index.capabilities.vector is (embedding is not None)
-                assert contexts.topic_memory_index.capabilities.vector is (embedding is not None)
                 if existing_memory:
                     assert memory is not None
-                    context = await contexts.get("project")
-                    result = await context.artifacts.memory.search("ordinary", memories=(memory,), mode="fts")
+                    result = await contexts.atomic_memory.for_scope("project").search("ordinary", mode="text")
                     assert [hit.text for hit in result.hits] == ["Preserve ordinary Memory."]
+                    assert result.hits[0].hit.artifact_ref.artifact_id == memory.artifact_id
+                    assert result.hits[0].hit.artifact_ref.revision == memory.revision
 
     asyncio.run(scenario())
 

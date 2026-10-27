@@ -29,9 +29,11 @@ from sqlalchemy.exc import ArgumentError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, create_async_engine
 
 from powercontext.builtin.persistence.database import AsyncDatabase
+from powercontext.builtin.persistence.dream_schema import assert_dream_schema_ready
 from powercontext.builtin.persistence.errors import PersistenceError
 from powercontext.builtin.persistence.schema import create_tables
 from powercontext.builtin.persistence.tables import MYSQL_IDENTITY_COLLATION
+from powercontext.builtin.persistence.topic_memory_recovery_schema import BUDGET, prepare_topic_memory_recovery_schema
 
 _DIALECT_DRIVER = "mysql+aoceanbase"
 _DIALECT_REGISTRY_NAME = "mysql.aoceanbase"
@@ -120,6 +122,7 @@ class OceanBaseProfile:
         *,
         tables: tuple[Table, ...],
         create_schema: bool = True,
+        _archive_recovery: bool = False,
     ) -> AsyncIterator[OceanBaseProfile]:
         """Create, initialize and exclusively own an official OceanBase engine."""
 
@@ -136,7 +139,11 @@ class OceanBaseProfile:
             pool_pre_ping=config.pool_pre_ping,
         )
         database = AsyncDatabase.own(engine)
-        async with _initialized_profile(cls(database=database, tables=tables), create_schema=create_schema) as profile:
+        async with _initialized_profile(
+            cls(database=database, tables=tables),
+            create_schema=create_schema,
+            _archive_recovery=_archive_recovery,
+        ) as profile:
             yield profile
 
     @classmethod
@@ -161,10 +168,17 @@ async def _initialized_profile(
     profile: OceanBaseProfile,
     *,
     create_schema: bool,
+    _archive_recovery: bool = False,
 ) -> AsyncIterator[OceanBaseProfile]:
     try:
         async with profile.database.transaction() as connection:
             await _require_mysql_tenant(connection)
+        await assert_dream_schema_ready(profile.database.engine, _archive_recovery=_archive_recovery)
+        if profile.tables:
+            await prepare_topic_memory_recovery_schema(
+                profile.database.engine, initialize=any(table.name == BUDGET for table in profile.tables)
+            )
+        async with profile.database.transaction() as connection:
             await _require_compatible_identity_collations(connection, profile.tables)
             if create_schema:
                 await create_tables(connection, profile.tables)
@@ -179,6 +193,12 @@ async def _require_mysql_tenant(connection: AsyncConnection) -> None:
     result = await connection.exec_driver_sql("SHOW VARIABLES LIKE 'ob_compatibility_mode'")
     row = result.first()
     mode = None if row is None or len(row) < 2 else str(row[1]).upper()
+    if row is None:
+        # Standalone SeekDB 1.4 is MySQL-only and no longer exposes the
+        # multi-tenant compatibility variable. Keep unknown servers rejected.
+        version_row = (await connection.exec_driver_sql("SELECT VERSION()")).first()
+        if version_row and "-OceanBase seekdb-" in str(version_row[0]):
+            return
     if mode != "MYSQL":
         raise UnsupportedOceanBaseTenantError(mode)
 

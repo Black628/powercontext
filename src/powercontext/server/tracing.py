@@ -17,7 +17,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from importlib import import_module
@@ -28,28 +28,18 @@ from fastmcp.server.middleware import CallNext, Middleware, MiddlewareContext
 from opentelemetry import context as otel_context
 from opentelemetry import propagate, trace
 from opentelemetry.context import Context, Token
-from opentelemetry.sdk.resources import SERVICE_NAME, Resource
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
 from opentelemetry.sdk.trace.id_generator import RandomIdGenerator
 from opentelemetry.sdk.trace.sampling import ALWAYS_OFF, ParentBased
-from opentelemetry.trace import (
-    Link,
-    Span,
-    SpanContext,
-    SpanKind,
-    Status,
-    StatusCode,
-    TraceFlags,
-    Tracer,
-    set_span_in_context,
-)
+from opentelemetry.trace import Span, SpanKind, Status, StatusCode, Tracer, set_span_in_context
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 from typing_extensions import override
 
-from powercontext.builtin.runtime.protocols import RuntimeTraceContext
+from powercontext._logging import error_category
 from powercontext.server.context import bind_request_id, is_internal_bridge, reset_request_id
 from powercontext.server.settings import TracingConfig
+from powercontext.server.telemetry import service_resource
 
 if TYPE_CHECKING:
     from pydantic_ai.models.instrumented import InstrumentationSettings
@@ -78,10 +68,28 @@ class _SuppressibleTracer(Tracer):
 
     @override
     def start_as_current_span(self, name: str, *args: Any, **kwargs: Any) -> Any:
-        return self._selected().start_as_current_span(name, *args, **kwargs)
+        # Provider exceptions can echo Source or prompt content. Disable the SDK's automatic
+        # exception events and status descriptions, then apply only bounded failure metadata.
+        kwargs["record_exception"] = False
+        kwargs["set_status_on_exception"] = False
+        return _sanitized_span(self._selected().start_as_current_span(name, *args, **kwargs))
 
     def _selected(self) -> Tracer:
         return self._noop if self._suppressed.get() else self._delegate
+
+
+@contextmanager
+def _sanitized_span(manager: Any) -> Iterator[Span]:
+    with manager as span:
+        try:
+            yield span
+        except asyncio.CancelledError:
+            raise
+        except BaseException as error:
+            with suppress(Exception):
+                span.set_attribute("error.type", type(error).__qualname__)
+                span.set_status(Status(StatusCode.ERROR))
+            raise
 
 
 class ServerTracing:
@@ -96,12 +104,12 @@ class ServerTracing:
         )
 
     @classmethod
-    def context_only(cls) -> ServerTracing:
+    def context_only(cls, *, role: str = "server") -> ServerTracing:
         """Create valid request contexts without recording or exporting spans."""
 
         return cls(
             TracerProvider(
-                resource=_server_resource(),
+                resource=service_resource(role),
                 sampler=ParentBased(ALWAYS_OFF),
                 shutdown_on_exit=False,
             )
@@ -114,7 +122,6 @@ class ServerTracing:
         kind: SpanKind,
         attributes: dict[str, Any],
         context: Context | None = None,
-        links: Sequence[Link] = (),
     ) -> _ActiveSpan:
         return _ActiveSpan.start(
             self.tracer,
@@ -122,7 +129,6 @@ class ServerTracing:
             kind=kind,
             attributes=attributes,
             context=context,
-            links=links,
         )
 
     @contextmanager
@@ -149,7 +155,7 @@ class ServerTracing:
             span.finish("cancelled", error=error)
             raise
         except BaseException as error:
-            span.finish("failure", error=error)
+            span.finish(span.outcome if span.outcome in {"blocked", "cancelled"} else "failure", error=error)
             raise
         span.finish(span.outcome or "success")
 
@@ -160,7 +166,6 @@ class ServerTracing:
         *,
         operation: str,
         attributes: Mapping[str, _TraceAttribute],
-        links: Sequence[RuntimeTraceContext] = (),
     ) -> Iterator[_ActiveSpan]:
         """Trace one scheduled activation as an independent trace root."""
 
@@ -179,7 +184,6 @@ class ServerTracing:
                     "powercontext.operation.name": operation,
                     "powercontext.operation.unit": "background",
                 },
-                links=_otel_links(links),
             )
             try:
                 yield span
@@ -187,7 +191,7 @@ class ServerTracing:
                 span.finish("cancelled", error=error)
                 raise
             except BaseException as error:
-                span.finish("failure", error=error)
+                span.finish(span.outcome if span.outcome in {"blocked", "cancelled"} else "failure", error=error)
                 raise
             span.finish(span.outcome or "success")
         finally:
@@ -234,23 +238,11 @@ class _ActiveSpan:
         self.token = token
         self.finished = False
         self._outcome: str | None = None
+        self._error_category: str | None = None
 
     @property
     def outcome(self) -> str | None:
         return self._outcome
-
-    @property
-    def trace_context(self) -> RuntimeTraceContext | None:
-        if self.span is None:
-            return None
-        with suppress(Exception):
-            context = self.span.get_span_context()
-            if context.is_valid:
-                return RuntimeTraceContext(
-                    trace_id=f"{context.trace_id:032x}",
-                    span_id=f"{context.span_id:016x}",
-                )
-        return None
 
     def set_outcome(self, outcome: str) -> None:
         self._outcome = outcome
@@ -264,11 +256,10 @@ class _ActiveSpan:
         kind: SpanKind,
         attributes: dict[str, Any],
         context: Context | None,
-        links: Sequence[Link] = (),
     ) -> _ActiveSpan:
         span: Span | None = None
         try:
-            span = tracer.start_span(name, context=context, kind=kind, attributes=attributes, links=links)
+            span = tracer.start_span(name, context=context, kind=kind, attributes=attributes)
             token = otel_context.attach(set_span_in_context(span, context))
         except Exception:
             if span is not None:
@@ -282,6 +273,9 @@ class _ActiveSpan:
         return request_id_from_span(self.span)
 
     def set_attributes(self, attributes: Mapping[str, Any]) -> None:
+        category = attributes.get("powercontext.error.category")
+        if isinstance(category, str):
+            self._error_category = category
         if self.span is not None:
             with suppress(Exception):
                 self.span.set_attributes(attributes)
@@ -300,9 +294,16 @@ class _ActiveSpan:
             with suppress(Exception):
                 self.span.set_attribute("powercontext.operation.outcome", outcome)
                 if attributes is not None:
-                    self.span.set_attributes(attributes)
+                    self.set_attributes(attributes)
                 if error is not None:
                     self.span.set_attribute("error.type", type(error).__qualname__)
+                category = self._error_category or error_category(
+                    None if error is None else type(error).__name__,
+                    status_code=None if attributes is None else attributes.get("http.response.status_code"),
+                    outcome=outcome,
+                )
+                if category is not None:
+                    self.span.set_attribute("powercontext.error.category", category)
                 if outcome == "failure":
                     self.span.set_status(Status(StatusCode.ERROR))
         if self.token is not None:
@@ -414,24 +415,7 @@ class McpTracingMiddleware(Middleware):
         return result
 
 
-def _otel_links(contexts: Sequence[RuntimeTraceContext]) -> tuple[Link, ...]:
-    links: list[Link] = []
-    for context in contexts:
-        try:
-            span_context = SpanContext(
-                trace_id=int(context.trace_id, 16),
-                span_id=int(context.span_id, 16),
-                is_remote=True,
-                trace_flags=TraceFlags(TraceFlags.SAMPLED),
-            )
-        except (TypeError, ValueError):
-            continue
-        if span_context.is_valid:
-            links.append(Link(span_context))
-    return tuple(links)
-
-
-def configure_server_tracing(config: TracingConfig) -> ServerTracing:
+def configure_server_tracing(config: TracingConfig, *, role: str = "server") -> ServerTracing:
     """Build request context and optional OTLP export from standard OTel configuration."""
 
     exporter_type = None
@@ -441,7 +425,7 @@ def configure_server_tracing(config: TracingConfig) -> ServerTracing:
         except ImportError as error:
             raise RuntimeError(_MISSING_OTLP_EXPORTER) from error
     provider = TracerProvider(
-        resource=_server_resource(),
+        resource=service_resource(role),
         sampler=None if config.enabled else ParentBased(ALWAYS_OFF),
         shutdown_on_exit=False,
     )
@@ -480,13 +464,6 @@ def request_id_from_span(span: Span | None = None) -> str:
     span_context = (trace.get_current_span() if span is None else span).get_span_context()
     span_id = span_context.span_id if span_context.is_valid else _ID_GENERATOR.generate_span_id()
     return format(span_id, "016x")
-
-
-def _server_resource() -> Resource:
-    resource = Resource.create()
-    if str(resource.attributes.get(SERVICE_NAME, "")).startswith("unknown_service"):
-        resource = resource.merge(Resource({SERVICE_NAME: "powercontext-server"}))
-    return resource
 
 
 def _headers(scope: Scope) -> dict[str, str]:

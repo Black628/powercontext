@@ -18,18 +18,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator, Sequence
-from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
+from contextlib import AsyncExitStack, asynccontextmanager, nullcontext, suppress
 from pathlib import Path
-from typing import cast
 
 from fastapi import FastAPI, Request, Response
 from fastapi.routing import APIRoute
-from pydantic import ValidationError
 from starlette.middleware import Middleware
-from typing_extensions import override
 
 from powercontext._logging import log_safely
+from powercontext.artifacts.search import ArtifactSearchExecutionContext
+from powercontext.builtin.artifacts.atomic_memory.extraction import AtomicMemoryGenerationPipeline
 from powercontext.builtin.artifacts.experience import ExperienceCandidatePipeline, ExperienceGenerator
 from powercontext.builtin.artifacts.handoff import HandoffGenerationPipeline
 from powercontext.builtin.artifacts.memory import CandidatePipeline
@@ -38,28 +37,30 @@ from powercontext.builtin.artifacts.skill import ExternalSkillProvider, SkillGen
 from powercontext.builtin.dream.generation import DreamGenerator
 from powercontext.builtin.inference import EmbeddingModel
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
-from powercontext.builtin.persistence.work import StoredWork, WorkClaim
+from powercontext.builtin.records import BaseOperationNotSupportedError
 from powercontext.builtin.runtime import (
     BuiltinRuntime,
     ExperienceIncubationResult,
+    MemoryFlushResult,
 )
-from powercontext.builtin.runtime.composition import WorkExecutionHooks, open_builtin_runtime
+from powercontext.builtin.runtime.application import ScheduledExperienceRunner, ScheduledSourceRunner
+from powercontext.builtin.runtime.composition import open_builtin_runtime
+from powercontext.builtin.runtime.config import BuiltinConfig
 from powercontext.builtin.runtime.processing_registry import processing_capabilities
-from powercontext.builtin.runtime.relational import RelationalContexts
-from powercontext.builtin.runtime.work_handlers import EXPERIENCE_WORK_KIND, MEMORY_WORK_KIND, SourceWindowPayload
-from powercontext.builtin.runtime.worker import WorkExecutionError
 from powercontext.builtin.sources import CONTENT_SOURCE_NAME
-from powercontext.errors import ArtifactNotFoundError
 from powercontext.http import (
+    ArtifactDreamingOperationCapability,
     Capabilities,
+    ExtractionStatus,
     MemorySearchMode,
     PreparedContextSchema,
     PromptCapability,
     ReadinessResponse,
     ReadinessStatus,
 )
+from powercontext.paths import default_scheduler_path
 from powercontext.server.access import HttpAccessLogMiddleware
-from powercontext.server.app import create_app
+from powercontext.server.app import _bind_evidence_access, access_readiness_checks, create_app
 from powercontext.server.authentication import (
     AuthenticationProvider,
     StaticBearerAuthenticationProvider,
@@ -67,27 +68,30 @@ from powercontext.server.authentication import (
 from powercontext.server.authz import (
     AccessAction,
     AccessAuditContext,
-    AccessControlError,
     AccessControlService,
-    AccessDeniedError,
-    MemoryEntrySelector,
+    CandidateOwnerAttestation,
     PrincipalRef,
     ResourceRef,
     access_control_for_mode,
 )
 from powercontext.server.authz.composition import open_builtin_access_control
-from powercontext.server.authz.repository import ACCESS_TABLES
+from powercontext.server.authz.repository import RelationalAccessRepository
 from powercontext.server.context import current_principal, current_request_id
 from powercontext.server.cursor_secret import resolve_cursor_secret
 from powercontext.server.dashboard import mount_dashboard
 from powercontext.server.dream_access import DreamAccess
+from powercontext.server.http_limits import HttpResourceLimitsMiddleware
+from powercontext.server.identity import ServerIdentityRepository
+from powercontext.server.info import server_info
+from powercontext.server.logging import worker_logging
 from powercontext.server.mcp import mount_mcp
 from powercontext.server.metrics import CONTENT_TYPE_LATEST, HttpMetricsMiddleware, ServerMetrics
-from powercontext.server.middleware import AuthenticationMiddleware, LocalPrincipalMiddleware
+from powercontext.server.middleware import AuthenticationMiddleware
 from powercontext.server.processing_security import build_worker_security
-from powercontext.server.rate_limit import SharedRateLimiter, SharedRateLimitMiddleware
+from powercontext.server.request_id import HttpRequestIdMiddleware
 from powercontext.server.settings import MissingAuthenticationProviderError, ServerSettings
 from powercontext.server.tracing import HttpTracingMiddleware, ServerTracing
+from powercontext.server.worker_tracing import WorkerTracing
 
 logger = logging.getLogger(__name__)
 
@@ -120,8 +124,7 @@ class _MetricsEndpoint:
                 ),
             )
         runtime = request.app.state.application
-        supervisor = None if runtime is None else runtime.artifact_processing_supervisor
-        self._metrics.set_processing_families({} if supervisor is None else supervisor.family_status)
+        self._metrics.refresh_runtime(runtime)
         return Response(self._metrics.render(), media_type=CONTENT_TYPE_LATEST)
 
 
@@ -129,7 +132,7 @@ def create_server_app(  # noqa: C901
     *,
     settings: ServerSettings | None = None,
     scheduler_path: str | Path | None = None,
-    candidate_pipeline: CandidatePipeline | None = None,
+    candidate_pipeline: CandidatePipeline | AtomicMemoryGenerationPipeline | None = None,
     experience_pipeline: ExperienceCandidatePipeline | None = None,
     experience_generator: ExperienceGenerator | None = None,
     profile_generator: ProfileGenerator | None = None,
@@ -143,13 +146,7 @@ def create_server_app(  # noqa: C901
     access_control: AccessControlService | None = None,
     authentication_provider: AuthenticationProvider | None = None,
 ) -> FastAPI:
-    """Build the Server process and mount MCP when configured.
-
-    ``scheduler_path`` remains an accepted bridge-release argument, but the
-    durable Scheduler stores all state in the primary database.
-    """
-
-    del scheduler_path
+    """Build the Server process and mount MCP when configured."""
 
     resolved = ServerSettings() if settings is None else settings
     if resolved.dashboard.enabled and (authentication_provider is not None or access_control is not None):
@@ -163,28 +160,44 @@ def create_server_app(  # noqa: C901
             authentication_provider=authentication_provider,
         )
     )
-    config = resolved.to_builtin_config()
-    metrics = ServerMetrics() if resolved.metrics.enabled else None
-    public_routes = config.deployment.role in {"all", "api"}
-    resolved_tracing = ServerTracing.context_only() if tracing is None else tracing
+    config = BuiltinConfig(
+        code=resolved.code,
+        runtime=resolved.runtime,
+        database=resolved.database,
+        handoff_report=resolved.handoff_report,
+        inference=resolved.inference,
+        external_skills=resolved.external_skills,
+    )
+    metrics = ServerMetrics(role=resolved.runtime.artifact_processing_role) if resolved.metrics.enabled else None
+    resolved_tracing = (
+        ServerTracing.context_only(role=resolved.runtime.artifact_processing_role) if tracing is None else tracing
+    )
     if metrics is not None:
         metrics.set_ready(False)
     readiness_probe = _ServerReadinessProbe(metrics, tracing=resolved_tracing)
-    rate_limiter = _shared_rate_limiter(resolved)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         _log_lifecycle("server.starting", "PowerContext Server is starting")
-        _log_startup_warnings(resolved)
+        if resolved.allow_insecure_http:
+            _log_insecure_remote_http_warning()
+        if isinstance(config.database, SQLiteConfig) and config.database.is_in_memory:
+            _log_in_memory_database_warning()
+        from powercontext.builtin.persistence.migrations.server_readiness import prepare_server_storage
+
+        await asyncio.to_thread(
+            prepare_server_storage,
+            resolved,
+            embedding_profile=None if embedding_model is None else embedding_model.profile,
+        )
         configured_cursor_secret = (
             None if resolved.cursor_signing_secret is None else resolved.cursor_signing_secret.get_secret_value()
         )
-        _validate_scheduled_work_access(
-            resolved,
-            legacy_static_principal=static_principal if legacy_static_admin else None,
-        )
         cursor_secret = resolve_cursor_secret(config.database, configured_cursor_secret)
         async with AsyncExitStack() as resources:
+            logging_bootstrap = resources.enter_context(
+                worker_logging(resolved.logging, role=resolved.runtime.artifact_processing_role)
+            )
             active_access_control = configured_access_control
             if active_access_control is None and resolved.access.mode == "enforced":
                 active_access_control = await resources.enter_async_context(
@@ -194,7 +207,7 @@ def create_server_app(  # noqa: C901
                         deployment_id=resolved.access.deployment_id,
                     )
                 )
-            work_execution_hooks = _work_access(
+            scheduled_source_runner, scheduled_experience_runner = _scheduled_access_runners(
                 resolved,
                 active_access_control,
                 legacy_static_principal=static_principal if legacy_static_admin else None,
@@ -214,6 +227,7 @@ def create_server_app(  # noqa: C901
             runtime = await resources.enter_async_context(
                 open_builtin_runtime(
                     config,
+                    scheduler_path=default_scheduler_path() if scheduler_path is None else scheduler_path,
                     candidate_pipeline=candidate_pipeline,
                     experience_pipeline=experience_pipeline,
                     experience_generator=experience_generator,
@@ -225,6 +239,7 @@ def create_server_app(  # noqa: C901
                     if dream_access is None
                     else dream_access.access.defer_decision_audit,
                     dream_candidate_attester=None if dream_access is None else dream_access.attest_candidate,
+                    dream_candidate_authorizer=None if dream_access is None else dream_access.authorize_candidate,
                     external_skill_provider=external_skill_provider,
                     handoff_pipeline=handoff_pipeline,
                     embedding_model=embedding_model,
@@ -232,26 +247,32 @@ def create_server_app(  # noqa: C901
                     scope_cache_observer=None if metrics is None else metrics.set_runtime_scopes,
                     topic_memory_search_observer=None if metrics is None else metrics.observe_topic_memory_search,
                     tracing=resolved_tracing,
-                    work_observer=metrics,
-                    work_execution_hooks=work_execution_hooks,
+                    model_usage_observer=None if metrics is None else metrics.observe_model_usage,
+                    worker_model_usage_observer=None if metrics is None else metrics.observe_worker_model_usage,
+                    processing_observer=None if metrics is None else metrics.observe_processing,
+                    scheduled_source_runner=scheduled_source_runner,
+                    scheduled_experience_runner=scheduled_experience_runner,
                     worker_security=worker_security,
-                    profile_work_runner=_scheduled_profile_runner(
+                    worker_initializer=logging_bootstrap,
+                    worker_entrypoint_wrapper=WorkerTracing(resolved.tracing).wrap,
+                    scheduled_profile_runner=_scheduled_profile_runner(
                         resolved,
                         active_access_control,
-                        enabled=config.deployment.role in {"all", "worker"}
-                        and config.runtime.profile_schedule_enabled
+                        enabled=config.runtime.profile_schedule_enabled
                         and (profile_generator is not None or config.inference.generation_model is not None),
                         legacy_static_principal=static_principal if legacy_static_admin else None,
                     ),
                     cursor_secret=cursor_secret,
-                    schema_extension_tables=ACCESS_TABLES if resolved.access.mode == "enforced" else (),
                     handoff_verification_keys=tuple(
                         secret.get_secret_value().encode()
                         for secret in resolved.handoff_generation_verification_secrets
                     ),
                 )
             )
-            _bind_dream_access(dream_access, runtime)
+            identity_repository = ServerIdentityRepository(runtime.primary_database)
+            await identity_repository.initialize()
+            server_id = await identity_repository.load_or_create()
+            _bind_evidence_access(runtime, active_access_control, resolved.access.mode)
             if active_access_control is not None:
                 migrated, unresolved = await runtime._records().migrate_handoff_receipts(
                     active_access_control.committed_receipt_identity,
@@ -260,33 +281,42 @@ def create_server_app(  # noqa: C901
                     "server.receipt_migration",
                     f"Receipt migration: {migrated} attested, {unresolved} pending in pc_receipt_migration_review",
                 )
+                await _remove_legacy_topic_owners(active_access_control)
             readiness_probe.bind(runtime)
             app.state.application = runtime
+            app.state.dashboard_runtime = runtime
             app.state.access_control = active_access_control
             app.state.authentication_provider = configured_authentication
-            operations = runtime.operations
-            if operations is None:
-                raise RuntimeError("the built-in runtime did not expose operation coordination")  # noqa: TRY003
-            app.state.operation_manager = operations
-            if rate_limiter is not None:
-                rate_limiter.bind(operations.database)
-            app.state.capabilities = await _server_capabilities(
-                runtime,
-                accepts_distributed_memory_work=config.deployment.mode == "distributed"
-                and config.deployment.role == "api",
-            )
+            readiness_probe.set_access_checks(_state_access_checks(app))
+            capabilities = await _server_capabilities(runtime)
+
+            def current_capabilities() -> Capabilities:
+                extraction = runtime.extraction_status()
+                return capabilities.model_copy(
+                    update={
+                        "extraction": (
+                            None if extraction is None else ExtractionStatus.model_validate(extraction.model_dump())
+                        ),
+                    }
+                )
+
+            app.state.capabilities = capabilities
+            app.state.capability_provider = current_capabilities
+            app.state.server_info = server_info(server_id)
             await readiness_probe()
+            if metrics is not None:
+                await resources.enter_async_context(readiness_probe.monitor())
             try:
                 yield
             finally:
                 _log_lifecycle("server.stopping", "PowerContext Server is stopping")
                 readiness_probe.unbind()
-                if rate_limiter is not None:
-                    rate_limiter.unbind()
                 app.state.application = None
-                app.state.operation_manager = None
+                app.state.dashboard_runtime = None
+                app.state.capability_provider = None
                 app.state.access_control = configured_access_control
                 app.state.authentication_provider = configured_authentication
+                app.state.server_info = None
                 app.state.capabilities = Capabilities(
                     source_types=[],
                     artifact_families=[],
@@ -300,12 +330,16 @@ def create_server_app(  # noqa: C901
                 )
         _log_lifecycle("server.stopped", "PowerContext Server stopped")
 
-    configured_middleware = _process_middleware(
-        middleware,
-        authentication=configured_authentication,
-        rate_limiter=rate_limiter,
-        dashboard_enabled=resolved.dashboard.enabled,
-    )
+    configured_middleware = list(middleware)
+    if configured_authentication is not None:
+        configured_middleware.insert(
+            0,
+            Middleware(
+                AuthenticationMiddleware,
+                provider=configured_authentication,
+                dashboard_enabled=resolved.dashboard.enabled,
+            ),
+        )
 
     app = create_app(
         lifespan=lifespan,
@@ -314,12 +348,19 @@ def create_server_app(  # noqa: C901
         metrics=metrics,
         tracing=resolved_tracing,
         handoff_report_enabled=resolved.handoff_report.enabled,
-        public_routes=public_routes,
         access_control=configured_access_control,
         access_mode=resolved.access.mode,
         authentication_provider=configured_authentication,
         allow_insecure_remote_http=resolved.allow_insecure_http,
     )
+    # Admission must see the outward send; only non-buffering instrumentation
+    # wraps it so early rejections retain the same correlation and observations.
+    app.add_middleware(
+        HttpResourceLimitsMiddleware,
+        max_request_body_bytes=resolved.http.max_request_body_bytes,
+        max_concurrent_requests=resolved.http.max_concurrent_requests,
+    )
+    app.add_middleware(HttpRequestIdMiddleware)
     if metrics is not None:
         app.add_api_route(
             "/metrics",
@@ -344,57 +385,24 @@ def create_server_app(  # noqa: C901
         operations=_http_operations(app),
         skip_paths=("/health/live", "/health/ready", "/metrics", resolved.mcp.path),
     )
-    if public_routes and resolved.mcp.enabled:
+    if resolved.mcp.enabled:
         mount_mcp(
             app,
             path=resolved.mcp.path,
             access_log=resolved.logging.access,
             metrics=metrics,
             tracing=resolved_tracing,
-            stateless_http=config.deployment.mode == "distributed",
         )
-    if public_routes and resolved.dashboard.enabled:
+    if resolved.dashboard.enabled:
         mount_dashboard(app)
     return app
 
 
-def _log_startup_warnings(settings: ServerSettings) -> None:
-    if settings.allow_insecure_http:
-        _log_insecure_remote_http_warning()
-    if isinstance(settings.database, SQLiteConfig) and settings.database.is_in_memory:
-        _log_in_memory_database_warning()
+def _state_access_checks(app: FastAPI) -> Callable[[], Awaitable[Mapping[str, str]]]:
+    async def checks() -> dict[str, str]:
+        return await access_readiness_checks(app.state)
 
-
-def _shared_rate_limiter(settings: ServerSettings) -> SharedRateLimiter | None:
-    if not settings.rate_limit.enabled:
-        return None
-    return SharedRateLimiter(
-        requests=settings.rate_limit.requests,
-        window_seconds=settings.rate_limit.window_seconds,
-    )
-
-
-def _process_middleware(
-    middleware: Sequence[Middleware],
-    *,
-    authentication: AuthenticationProvider | None,
-    rate_limiter: SharedRateLimiter | None,
-    dashboard_enabled: bool,
-) -> list[Middleware]:
-    configured = list(middleware)
-    authentication_middleware = (
-        Middleware(LocalPrincipalMiddleware)
-        if authentication is None
-        else Middleware(
-            AuthenticationMiddleware,
-            provider=authentication,
-            dashboard_enabled=dashboard_enabled,
-        )
-    )
-    configured.insert(0, authentication_middleware)
-    if rate_limiter is not None:
-        configured.insert(1, Middleware(SharedRateLimitMiddleware, limiter=rate_limiter))
-    return configured
+    return checks
 
 
 def _resolve_security_providers(
@@ -423,150 +431,98 @@ def _resolve_security_providers(
     return static_principal, authentication, access_control, True
 
 
-def _bind_dream_access(access: DreamAccess | None, runtime: BuiltinRuntime) -> None:
-    if access is not None:
-        access.bind(runtime)
+async def _remove_legacy_topic_owners(access: AccessControlService) -> None:
+    """Drop the Artifact owner rows older versions retained for Topic Memory.
+
+    Access tables are open only while a real service is configured, and a
+    deployment that ran an older version may still hold stale rows that the
+    owner-derived authorized resource filter reads back.
+    """
+    if not isinstance(access, AccessControlService):
+        return
+    relationships = access.relationships
+    if not isinstance(relationships, RelationalAccessRepository):
+        return
+    removed = await relationships.delete_legacy_topic_memory_owners()
+    if removed:
+        _log_lifecycle("server.topic_owner_cleanup", f"Removed {removed} legacy topic-memory Artifact owner rows")
 
 
-class _WorkAccess(WorkExecutionHooks):
-    def __init__(
-        self,
-        access: AccessControlService,
-        background_principal: PrincipalRef | None,
-        *,
-        memory_enabled: bool,
-        experience_enabled: bool,
-    ) -> None:
-        self._access = access
-        self._background_principal = background_principal
-        self._memory_enabled = memory_enabled
-        self._experience_enabled = experience_enabled
-
-    @override
-    async def authorize(self, contexts: RelationalContexts, claim: WorkClaim, /) -> None:
-        principal = self._principal_for(claim)
-        if principal is None:
-            return
-        context = AccessAuditContext(transport="background", operation=claim.kind)
-        try:
-            await self._access.bootstrap_static_scope(principal, claim.scope_id, context=context)
-            await self._access.require(
-                principal,
-                AccessAction.SCOPE_CONTRIBUTE,
-                ResourceRef.scope(claim.scope_id),
-                context=context,
-            )
-            if claim.kind == MEMORY_WORK_KIND:
-                await self._access.require_all(
-                    principal,
-                    tuple(
-                        (AccessAction.ARTIFACT_WRITE, resource)
-                        for resource in await _memory_resources(contexts, claim.scope_id)
-                    ),
-                    context=context,
-                )
-        except AccessDeniedError:
-            raise WorkExecutionError(
-                category="authorization",
-                code="background_access_denied",
-                retryable=False,
-            ) from None
-        except AccessControlError:
-            raise WorkExecutionError(
-                category="authorization",
-                code="background_access_unavailable",
-                retryable=True,
-            ) from None
-
-    @override
-    async def succeeded(self, contexts: RelationalContexts, work: StoredWork, /) -> None:
-        principal = self._principal_for(work)
-        if principal is None:
-            return
-        if work.kind == MEMORY_WORK_KIND:
-            await self._establish_memory_owners(contexts, work.scope_id, principal)
-            return
-        result = ExperienceIncubationResult.model_validate(work.result_payload)
-        for candidate_id in result.candidate_ids:
-            await self._access.attest_candidate_owner(
-                scope_id=work.scope_id,
-                candidate_id=candidate_id,
-                family="experience",
-                proposed_owner=principal,
-                target=None,
-                idempotency_key=f"background-candidate-owner:{work.scope_id}:{candidate_id}",
-            )
-
-    async def _establish_memory_owners(
-        self,
-        contexts: RelationalContexts,
-        scope_id: str,
-        principal: PrincipalRef,
-    ) -> None:
-        context = AccessAuditContext(transport="background", operation=MEMORY_WORK_KIND)
-        for resource in await _memory_resources(contexts, scope_id):
-            if await self._access.artifact_owner(resource) is not None:
-                continue
-            selector = cast(MemoryEntrySelector, resource.selector)
-            await self._access.establish_artifact_owner(
-                resource,
-                principal,
-                idempotency_key=f"background-memory-owner:{scope_id}:{resource.artifact_id}:{selector.entry_id}",
-                context=context,
-            )
-
-    def _principal_for(self, work: WorkClaim | StoredWork) -> PrincipalRef | None:
-        try:
-            requester = SourceWindowPayload.model_validate(work.payload).requester
-        except ValidationError:
-            requester = None
-        if requester is not None:
-            return PrincipalRef(type=requester.type, id=requester.id)
-        if (work.kind == MEMORY_WORK_KIND and self._memory_enabled) or (
-            work.kind == EXPERIENCE_WORK_KIND and self._experience_enabled
-        ):
-            return self._background_principal
-        return None
-
-
-def _work_access(
+def _scheduled_access_runners(
     settings: ServerSettings,
     access: AccessControlService | None,
     *,
     legacy_static_principal: PrincipalRef | None,
-) -> WorkExecutionHooks | None:
-    if settings.access.mode != "enforced" or settings.deployment.role not in {"all", "worker"}:
-        return None
+) -> tuple[ScheduledSourceRunner | None, ScheduledExperienceRunner | None]:
+    source_scheduled = settings.runtime.schedule_seconds is not None
+    experience_scheduled = settings.runtime.experience_schedule_seconds is not None
+    if settings.access.mode == "disabled" or not (source_scheduled or experience_scheduled):
+        return None, None
     if access is None:
-        raise ValueError("background work in enforced mode requires an Authorization Provider")  # noqa: TRY003
-    principal = (
-        _scheduled_principal(settings, legacy_static_principal=legacy_static_principal)
-        if _scheduled_work_access_required(settings)
-        else None
-    )
-    return _WorkAccess(
-        access,
-        principal,
-        memory_enabled=settings.runtime.schedule_seconds is not None,
-        experience_enabled=settings.runtime.experience_schedule_seconds is not None,
-    )
+        raise ValueError("scheduled processing in enforced mode requires an Authorization Provider")  # noqa: TRY003
+    principal = _scheduled_principal(settings, legacy_static_principal=legacy_static_principal)
 
+    async def process_sources(scope_id: str, runtime: BuiltinRuntime) -> MemoryFlushResult:
+        context = AccessAuditContext(transport="background", operation="process_source_window")
+        await access.bootstrap_static_scope(principal, scope_id, context=context)
+        await access.require(principal, AccessAction.SCOPE_CONTRIBUTE, ResourceRef.scope(scope_id), context=context)
+        if runtime.atomic_memory is None:
+            raise BaseOperationNotSupportedError("artifact_family", "atomic-memory", "runtime application")
+        return await runtime.atomic_memory.for_scope(scope_id).flush(
+            context=ArtifactSearchExecutionContext(principal=principal, access=access, audit=context),
+        )
 
-def _scheduled_work_access_required(settings: ServerSettings) -> bool:
+    async def incubate_experience(scope_id: str, runtime: BuiltinRuntime) -> ExperienceIncubationResult:
+        context = AccessAuditContext(transport="background", operation="incubate_experience_candidates")
+        await access.bootstrap_static_scope(principal, scope_id, context=context)
+        await access.require(principal, AccessAction.SCOPE_CONTRIBUTE, ResourceRef.scope(scope_id), context=context)
+
+        async def on_commit(connection, candidates):
+            bound = access.with_connection(connection)
+            await bound.attest_candidate_owners(
+                tuple(
+                    CandidateOwnerAttestation(
+                        scope_id=scope_id,
+                        candidate_id=candidate.candidate_id,
+                        family="experience",
+                        proposed_owner=principal,
+                        target=None
+                        if candidate.target is None
+                        else ResourceRef.artifact(
+                            scope_id,
+                            family=candidate.target.family,
+                            artifact_id=candidate.target.artifact_id,
+                        ),
+                        idempotency_key=f"background-candidate-owner:{scope_id}:{candidate.candidate_id}",
+                    )
+                    for candidate in candidates
+                )
+            )
+
+        if runtime.owner_write_database is not None and access.supports_write_transaction(
+            runtime.owner_write_database.engine
+        ):
+            return await runtime.experience.for_scope(scope_id).incubate(on_commit=on_commit)
+        result = await runtime.experience.for_scope(scope_id).incubate()
+        await access.attest_candidate_owners(
+            tuple(
+                CandidateOwnerAttestation(
+                    scope_id=scope_id,
+                    candidate_id=candidate_id,
+                    family="experience",
+                    proposed_owner=principal,
+                    target=None,
+                    idempotency_key=f"background-candidate-owner:{scope_id}:{candidate_id}",
+                )
+                for candidate_id in result.candidate_ids
+            )
+        )
+        return result
+
     return (
-        settings.access.mode == "enforced"
-        and settings.deployment.role in {"all", "worker"}
-        and (settings.runtime.schedule_seconds is not None or settings.runtime.experience_schedule_seconds is not None)
+        process_sources if source_scheduled else None,
+        incubate_experience if experience_scheduled else None,
     )
-
-
-def _validate_scheduled_work_access(
-    settings: ServerSettings,
-    *,
-    legacy_static_principal: PrincipalRef | None,
-) -> None:
-    if _scheduled_work_access_required(settings):
-        _scheduled_principal(settings, legacy_static_principal=legacy_static_principal)
 
 
 def _scheduled_profile_runner(settings, access, *, enabled, legacy_static_principal):
@@ -628,33 +584,25 @@ def _scheduled_principal(
     raise ValueError("scheduled processing in enforced mode requires ACCESS_BACKGROUND_PRINCIPAL_ID")  # noqa: TRY003
 
 
-async def _memory_resources(contexts: RelationalContexts, scope_id: str) -> tuple[ResourceRef, ...]:
-    context = await contexts.get(scope_id)
-    artifact_id = context.artifacts.memory_artifact_id
-    try:
-        memory = await context.artifacts.memory.head(artifact_id)
-    except ArtifactNotFoundError:
-        return ()
-    return tuple(
-        ResourceRef.artifact(
-            scope_id,
-            family="memory",
-            artifact_id=artifact_id,
-            selector=MemoryEntrySelector(entry_id=entry.entry_id),
-        )
-        for entry in memory.content.manifest.entries
-    )
-
-
 class _ServerReadinessProbe:
-    def __init__(self, metrics: ServerMetrics | None, *, tracing: ServerTracing) -> None:
+    def __init__(
+        self,
+        metrics: ServerMetrics | None,
+        *,
+        tracing: ServerTracing,
+        access_checks: Callable[[], Awaitable[Mapping[str, str]]] | None = None,
+    ) -> None:
         self._metrics = metrics
         self._tracing = tracing
+        self._access_checks = access_checks
         self._runtime: BuiltinRuntime | None = None
         self._last_status: ReadinessStatus | None = None
 
     def bind(self, runtime: BuiltinRuntime) -> None:
         self._runtime = runtime
+
+    def set_access_checks(self, access_checks: Callable[[], Awaitable[Mapping[str, str]]] | None) -> None:
+        self._access_checks = access_checks
 
     def unbind(self) -> None:
         self._runtime = None
@@ -672,8 +620,44 @@ class _ServerReadinessProbe:
                 )
             else:
                 response = await self._check(runtime)
+        if self._metrics is not None:
+            await self._publish(response)
         self._observe(response.status)
         return response
+
+    async def _publish(self, response: ReadinessResponse) -> None:
+        """Publish the readiness aggregate that `/health/ready` would return."""
+
+        metrics = self._metrics
+        if metrics is None:
+            return
+        status = response.status
+        checks: dict[str, str] = dict(response.checks)
+        provider = self._access_checks
+        if provider is not None:
+            try:
+                checks = {**checks, **await provider()}
+            except Exception:
+                # An unreadable access layer only means the Server is not ready.
+                checks = {**checks, "access_provider": "not_ready"}
+            if any(checks.get(name) == "not_ready" for name in ("authentication_provider", "access_provider")):
+                status = ReadinessStatus.NOT_READY
+        metrics.observe_readiness(status.value, checks)
+
+    @asynccontextmanager
+    async def monitor(self) -> AsyncIterator[None]:
+        async def refresh() -> None:
+            while True:
+                await asyncio.sleep(30)
+                await self()
+
+        task = asyncio.create_task(refresh(), name="powercontext-readiness")
+        try:
+            yield
+        finally:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
 
     async def _check(self, runtime: BuiltinRuntime) -> ReadinessResponse:
         try:
@@ -742,23 +726,32 @@ def _http_operations(app: FastAPI) -> dict[tuple[str, str], str]:
     }
 
 
-async def _server_capabilities(
-    runtime: BuiltinRuntime,
-    *,
-    accepts_distributed_memory_work: bool = False,
-) -> Capabilities:
+async def _server_capabilities(runtime: BuiltinRuntime) -> Capabilities:
     capabilities = await runtime.capabilities()
     return Capabilities(
         source_types=[CONTENT_SOURCE_NAME],
-        artifact_families=["memory", "topic-memory", "experience", "skill", "handoff", "profile", "prompt"],
+        artifact_families=[
+            "memory",
+            "atomic-memory",
+            "topic-memory",
+            "experience",
+            "skill",
+            "handoff",
+            "profile",
+            "prompt",
+        ],
         prompts={
             key: PromptCapability.model_validate_json(value.model_dump_json())
             for key, value in capabilities.prompts.items()
         },
-        memory_extraction=capabilities.memory_extraction or accepts_distributed_memory_work,
+        memory_extraction=capabilities.memory_extraction,
         experience_generation=capabilities.experience_generation,
         managed_skill_generation=capabilities.managed_skill_generation,
         artifact_dreaming=capabilities.artifact_dreaming,
+        artifact_dreaming_operations=[
+            ArtifactDreamingOperationCapability.model_validate(value.model_dump())
+            for value in capabilities.artifact_dreaming_operations
+        ],
         external_skill_registry=capabilities.external_skill_registry,
         handoff_generation=capabilities.handoff_generation,
         search_modes=[MemorySearchMode(mode) for mode in capabilities.memory_search_modes],
@@ -767,5 +760,31 @@ async def _server_capabilities(
 
 
 __all__ = [
+    "create_background_metrics_app",
     "create_server_app",
 ]
+
+
+def create_background_metrics_app(
+    settings: ServerSettings,
+    runtime: BuiltinRuntime | None,
+    metrics: ServerMetrics,
+    access_control: AccessControlService | None,
+) -> FastAPI:
+    """Expose infrastructure only, reusing the Server authentication/error contracts."""
+    _, authentication, access, _ = _resolve_security_providers(
+        settings, access_control=access_control, authentication_provider=None
+    )
+    middleware = [] if authentication is None else [Middleware(AuthenticationMiddleware, provider=authentication)]
+    app = create_app(
+        infrastructure_only=True,
+        middleware=middleware,
+        metrics=metrics,
+        access_control=access,
+        access_mode=settings.access.mode,
+        authentication_provider=authentication,
+    )
+    app.state.application = runtime
+    if settings.metrics.enabled:
+        app.add_api_route("/metrics", _MetricsEndpoint(metrics), include_in_schema=False)
+    return app

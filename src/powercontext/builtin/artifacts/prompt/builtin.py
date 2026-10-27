@@ -16,6 +16,16 @@
 
 from typing import cast
 
+from powercontext.builtin.artifacts.atomic_memory.extraction import (
+    AtomicMemoryExtractionInput,
+    AtomicMemoryExtractionOutput,
+    atomic_memory_extraction_instructions,
+)
+from powercontext.builtin.artifacts.atomic_memory.reconciliation import (
+    ATOMIC_MEMORY_RECONCILIATION_INSTRUCTIONS,
+    AtomicMemoryReconciliationInput,
+    AtomicMemoryReconciliationOutput,
+)
 from powercontext.builtin.artifacts.experience import (
     EXPERIENCE_GENERATION_INSTRUCTIONS,
     EXPERIENCE_GENERATION_INSTRUCTIONS_VERSION,
@@ -53,6 +63,7 @@ from powercontext.builtin.artifacts.skill import (
     SkillGenerationOutput,
 )
 from powercontext.builtin.artifacts.topic_memory.generation import (
+    TOPIC_MEMORY_CONTENT_INSTRUCTIONS,
     TOPIC_MEMORY_EVOLVE_INSTRUCTIONS,
     TOPIC_MEMORY_GLOBAL_INSTRUCTIONS,
     TOPIC_MEMORY_PLANNER_INSTRUCTIONS,
@@ -91,6 +102,26 @@ def builtin_prompt_definitions(
     """Keep existing Auto instructions unchanged while exposing replaceable custom guidance."""
 
     return (
+        PromptDefinition(
+            key="atomic_memory.extract",
+            definition_version="powercontext.prompt.atomic-memory.extract.v1",
+            input_type=AtomicMemoryExtractionInput,
+            output_type=AtomicMemoryExtractionOutput,
+            builtin_version=f"powercontext.atomic-memory.extract.{profile.value}.v1",
+            invariant_instructions=atomic_memory_extraction_instructions(profile),
+            default_instructions=atomic_memory_extraction_instructions(profile),
+            builtin_profile=profile.value,
+            noop_field="candidates",
+        ),
+        PromptDefinition(
+            key="atomic_memory.reconcile",
+            definition_version="powercontext.prompt.atomic-memory.reconcile.v1",
+            input_type=AtomicMemoryReconciliationInput,
+            output_type=AtomicMemoryReconciliationOutput,
+            builtin_version="powercontext.atomic-memory.reconcile.v1",
+            invariant_instructions=ATOMIC_MEMORY_RECONCILIATION_INSTRUCTIONS,
+            default_instructions=ATOMIC_MEMORY_RECONCILIATION_INSTRUCTIONS,
+        ),
         PromptDefinition(
             key="memory.extract",
             definition_version="powercontext.prompt.memory.extract.v1",
@@ -173,6 +204,9 @@ Preserve applicability, failure handling, and validation status. Return proposal
             invariant_instructions=_COMMON_INVARIANTS
             + """
 Generate a Handoff for the supplied objective. Every state and next-action statement must cite supplied evidence IDs.
+Treat rollover_reasons as advisory preparation context only; do not claim they are committed Handoff content.
+When rollover_reasons is non-empty, draft a fresh-session checkpoint: do not depend on the old transcript,
+avoid "continue above" wording, and make the next participant's first safe action explicit.
 Separate observed state from proposed next actions. Use continuable, blocked, or complete accurately.
 Omit next_action when complete. Record uncertainty as omissions and stay within max_bytes.
 Do not change the objective or claim the draft is committed.
@@ -262,9 +296,11 @@ def _topic_memory_prompt_definitions() -> tuple[PromptDefinition, ...]:
             definition_version=f"powercontext.prompt.topic_memory.{name}.v1",
             input_type=input_type,
             output_type=output_type,
-            builtin_version=f"powercontext.topic_memory.{name}.v1",
+            builtin_version=f"powercontext.topic_memory.{name}.v2",
             invariant_instructions=(
                 _COMMON_INVARIANTS
+                + "\n"
+                + TOPIC_MEMORY_CONTENT_INSTRUCTIONS
                 + "\nCite only supplied opaque evidence and historical IDs; never invent persistence identities or revisions."
                 + f"\n{stage_contracts[name]}"
             ),

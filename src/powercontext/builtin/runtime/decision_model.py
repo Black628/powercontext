@@ -66,6 +66,16 @@ class DecisionOutcome(StrEnum):
     ABSTAIN = "abstain"
 
 
+class DecisionKind(StrEnum):
+    """Stable, low-cardinality consumer labels for one decision request.
+
+    A single naming source keeps call sites, telemetry, and tracing from drifting into
+    ad-hoc strings; the direction of a positive answer is never encoded here.
+    """
+
+    MEMORY_WRITE_GATE = "memory.write-gate"
+
+
 @dataclass(frozen=True, slots=True)
 class DecisionRequest:
     """One bounded question and the material a decision backend may judge.
@@ -134,8 +144,19 @@ class LLMDecisionModel:
 
     policy_id = DECISION_INSTRUCTIONS_VERSION
 
-    def __init__(self, generator: StructuredGenerator[DecisionInput, DecisionOutput], /) -> None:
+    def __init__(
+        self,
+        generator: StructuredGenerator[DecisionInput, DecisionOutput],
+        /,
+        *,
+        is_local_only: bool = False,
+        provider_id: str | None = None,
+        backend_model_id: str | None = None,
+    ) -> None:
         self._generator = generator
+        self.is_local_only = is_local_only
+        self.provider_id = provider_id
+        self.backend_model_id = backend_model_id
 
     async def evaluate(self, request: DecisionRequest, /) -> DecisionResult:
         """Map the model's validated answer onto one portable result."""
@@ -167,6 +188,9 @@ class FailOpenDecisionModel:
     def __init__(self, delegate: DecisionModel, /, *, timeout_seconds: float | None = None) -> None:
         self._delegate = delegate
         self.policy_id = delegate.policy_id
+        self.is_local_only = bool(getattr(delegate, "is_local_only", False))
+        self.provider_id = getattr(delegate, "provider_id", None)
+        self.backend_model_id = getattr(delegate, "backend_model_id", None)
         self._timeout_seconds = timeout_seconds
 
     async def evaluate(self, request: DecisionRequest, /) -> DecisionResult:
@@ -319,6 +343,7 @@ __all__ = [
     "DECISION_INSTRUCTIONS",
     "DECISION_INSTRUCTIONS_VERSION",
     "DecisionInput",
+    "DecisionKind",
     "DecisionModel",
     "DecisionModelOption",
     "DecisionModelRequest",

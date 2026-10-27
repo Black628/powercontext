@@ -21,6 +21,47 @@ secret-bearing deployment artifact.
 group or other permissions. The service records its identity and refuses to launch if the file is replaced or its
 ownership, permissions, or contents change; run `service install` again after an intentional update.
 
+## Atomic Memory
+
+See [Use Atomic Memory](../workflows/atomic-memory.md) for creation, search, lifecycle and restoration examples,
+and [offline migration](atomic-memory-migration.md) for existing databases.
+
+Restoration previews require an explicit shared signing key. Every process that generates or validates tokens must
+use the same secret and key ID:
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_PREVIEW_SIGNING_SECRET` | unset | Secret of at least 32 characters; without it, previews and token validation return `422 invalid_preview`, while direct restoration remains available |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_PREVIEW_SIGNING_KEY_ID` | `atomic-memory-v1` | Current key ID, 1–128 characters; deployment configuration loads only this one key |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_PREVIEW_TTL_SECONDS` | `300` | Preview lifetime, 1–3600 seconds |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_RESTORE_RETRY_BUDGET` | `3` | Re-read and preparation retries after `atomic_memory_changed` during restoration without a token, 0–10; the default permits the initial attempt plus 3 retries |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_RELATED_MODE` | `auto` | Related-memory recall during Source processing: `auto`, `fts`, `vector` or `hybrid`; auto selects fts without a profile and hybrid with one |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_RELATED_MAX_DISTANCE` | `1.0` | Maximum exact L2 distance for complete related-vector enumeration, nonnegative; does not apply to ordinary searches with a limit |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_RELATED_FTS_FALLBACK` | `false` | Explicitly permit full-text enumeration when the related query vector is unavailable, profiles mismatch or vector projections are incomplete; ordinary search error handling is unchanged |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_COMPARISON_BATCH_SIZE` | `20` | Maximum related objects per comparison call, positive integer; it is not a total candidate limit |
+| `POWERCONTEXT_SERVER_RUNTIME_ATOMIC_MEMORY_INPUT_TOKENS_LIMIT` | `24000` | Estimated tokens per extraction/comparison input, including instructions and complete input, positive integer |
+
+An unset secret never generates a random process key. Changing the secret or key ID invalidates old tokens; preview
+again. A restoration with a token returns `preview_stale` on changes instead of reinterpreting the intent. The retry
+budget does not replay a write whose commit outcome is unknown after a connection failure.
+
+Source processing generates candidates, then enumerates related active memories satisfying permission, tag and
+retrieval eligibility. Fts enumerates all qualifying matches; vector enumerates all results within its threshold;
+hybrid combines both. Neither comparison batch size nor token budget truncates the total candidates. Oversized
+comparison input reduces the batch until every candidate is processed. A single object or complete extraction input
+that exceeds the budget fails the window without partial publication or cursor advancement. Fallback changes recall
+evidence and requires an explicit choice; by default errors retain the window for diagnosis and retry.
+
+Atomic Memory has no legacy collection capacity budget or compact operation. `MEMORY_MAX_ACTIVE_ENTRIES`,
+`MEMORY_MAX_MANIFEST_ENTRIES`, `MEMORY_MAX_MANIFEST_BYTES` and `MEMORY_COMPACTION_*` settings remain parseable but do not
+limit new memories or enable compaction. MemoryWriteGate is fail-open and only governs the write decision; it never
+changes authoritative history. For a hosted decision backend, set `MEMORY_WRITE_GATE_PRIVACY_BOUNDARY=hosted_redacted`
+and explicitly select `MEMORY_WRITE_GATE_SANITIZER=known_secrets`. The sanitizer covers known sensitive environment/Codex
+values and a bounded set of provider-key prefixes; it is not a general PII or password detector. The sanitizer selection
+defaults to `none`, and hosted-redacted composition fails with a named configuration error until one is selected.
+The existing limit of 32 tags per Artifact still applies. If merged input tags exceed it, the whole merge fails;
+Source processing also retains the window without partial publication or cursor advancement.
+
 ## User data
 
 `POWERCONTEXT_HOME` overrides the directory used by the installed Server:
@@ -35,23 +76,50 @@ Without an override, the default is:
 - macOS: `~/Library/Application Support/powercontext`;
 - Windows: `%LOCALAPPDATA%\\powercontext`.
 
-The default SQLite database is `powercontext.db` in this directory. Background processors persist intents and
-scheduling checkpoints in the configured database. In distributed mode, the shared OceanBase database also stores
-Work Ledger leases and operation state. The former `scheduler.db` sidecar is no longer part of execution. Existing
-installations require [offline migration](artifact-processing-migration.md).
+The default SQLite database is `powercontext.db` in this directory. Built-in background processors persist
+intents and scheduling checkpoints in the same database. Existing installations require [offline migration](artifact-processing-migration.md).
+
+The built-in SQLite backend requires Python's linked SQLite library (`sqlite3.sqlite_version`) to be **3.38.0 or newer**,
+with FTS5, JSON functions, and loadable sqlite-vec for vector search. This retains the backend minimum specified in
+[the Memory design](../../rfcs/0014_memory_layer_design.md#sqlite-adapter), including native vector `IN` filtering.
+Older libraries are rejected before database initialization or accepting writes.
 
 ## Server
 
 Server settings use the `POWERCONTEXT_SERVER_` prefix.
 
+Each Server process admits at most 64 concurrent external HTTP requests, including REST, MCP, Dashboard, and health
+requests. A request occupies a slot while its body is read and until its response finishes, including streaming
+responses. Saturation returns `503` with error code `server_overloaded` and `Retry-After: 1` immediately, without
+queueing or reading the rejected request body. Exceptions and cancellation release the slot. Trusted in-process
+MCP-to-HTTP projections reuse the external request's admission.
+
+Before downstream parsing, the Server checks the actual body against a 16 MiB limit, including chunked uploads.
+An oversized declared `Content-Length` is rejected early; an absent or smaller declared length cannot bypass the
+actual-byte check. Oversized requests return `413` with error code `request_too_large`, and reading stops at the
+first excess chunk. This deployment-level cap is configurable and does not change domain field limits. The default
+fits the current 5 MiB Skill archive limit, whose base64 representation takes at most 6,990,508 characters, plus its
+JSON envelope. Lower caps can reject otherwise valid operations. Both HTTP limits must be positive integers.
+Size them for available memory: 64 requests retaining 16 MiB each already represent 1 GiB of body data, before
+parsing and application overhead; replay briefly copies each accepted body once before releasing its input buffer.
+Reverse proxies own request-rate quotas, upload timeouts, connection limits,
+and aggregate limits across Server processes.
+
+MCP uses stateless Streamable HTTP so each tool execution receives the current request's authenticated identity.
+It does not issue transport session IDs or retain resumable cross-request SSE sessions. Reconnect clients after
+upgrading from a stateful Server. Persisted Scope, Memory and Handoff data are unaffected. A long-lived response
+still occupies an HTTP slot until it finishes; reserve other slots for concurrent requests.
+
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `POWERCONTEXT_SERVER_HTTP_HOST` | `127.0.0.1` | Listener address |
 | `POWERCONTEXT_SERVER_HTTP_PORT` | `8000` | Listener port; the configuration wizard suggests `17429` for new setups |
+| `POWERCONTEXT_SERVER_HTTP_MAX_REQUEST_BODY_BYTES` | `16777216` | Maximum external HTTP body bytes before parsing, including chunked uploads |
+| `POWERCONTEXT_SERVER_HTTP_MAX_CONCURRENT_REQUESTS` | `64` | Per-process external HTTP requests in flight, including full streaming responses |
 | `POWERCONTEXT_SERVER_WORKSPACE` | Server startup directory | Resolution root for local project Agent Skill folders |
 | `POWERCONTEXT_SERVER_MCP_ENABLED` | `true` | Enable Streamable HTTP MCP |
 | `POWERCONTEXT_SERVER_MCP_PATH` | `/mcp` | MCP path |
-| `POWERCONTEXT_SERVER_DASHBOARD_ENABLED` | `false` | Personal and demonstration Dashboard; requires static Bearer authentication and does not support injected authentication or authorization Providers |
+| `POWERCONTEXT_SERVER_DASHBOARD_ENABLED` | `false` | Personal and demonstration Dashboard; local `ACCESS_MODE=disabled` needs no token, while `enforced` requires a static Bearer token; injected authentication or authorization Providers are unsupported |
 | `POWERCONTEXT_SERVER_AUTH_ENABLED` | `false` | Legacy static bearer switch; `true` maps to `ACCESS_MODE=enforced` and requires `AUTH_TOKEN` |
 | `POWERCONTEXT_SERVER_AUTH_TOKEN` | unset | Legacy static bearer token; used as compatibility authentication and mapped to the built-in administrator when no Authentication Provider is injected |
 | `POWERCONTEXT_SERVER_ACCESS_MODE` | `disabled` | The only supported Access switch: `disabled` or `enforced` |
@@ -65,46 +133,37 @@ Server settings use the `POWERCONTEXT_SERVER_` prefix.
 | `POWERCONTEXT_SERVER_LOGGING_LEVEL` | `INFO` | Operational log level |
 | `POWERCONTEXT_SERVER_LOGGING_FORMAT` | `console` | `console` or structured `json` output |
 | `POWERCONTEXT_SERVER_LOGGING_ACCESS` | `true` | Log external HTTP and logical MCP request completion |
+| `POWERCONTEXT_SERVER_LOGGING_FILE` | `false` | Write managed files instead of stdout; enabled by default for macOS/Windows personal services |
+| `POWERCONTEXT_SERVER_LOGGING_DIRECTORY` | User data directory + `logs/` | Managed log directory |
+| `POWERCONTEXT_SERVER_LOGGING_MAX_BYTES` | `20971520` | Positive size threshold for rotation |
+| `POWERCONTEXT_SERVER_LOGGING_BACKUP_COUNT` | `10` | Positive maximum archive count per active file |
+| `POWERCONTEXT_SERVER_LOGGING_COMPRESSION` | `gzip` | Archive compression: `gzip` or `none` |
 | `POWERCONTEXT_SERVER_METRICS_ENABLED` | `true` | Expose Prometheus metrics at `/metrics` |
+| `POWERCONTEXT_SERVER_METRICS_BACKGROUND_PORT` | `8001` | Background-role infrastructure listener port; uses `HTTP_HOST` and is disabled with metrics |
 | `POWERCONTEXT_SERVER_TRACING_ENABLED` | `false` | Enable span recording and OTLP export |
 | `POWERCONTEXT_SERVER_CURSOR_SIGNING_SECRET` | local persisted key | Shared secret of at least 32 bytes for signing REST pagination cursors |
 | `POWERCONTEXT_SERVER_DATABASE_KIND` | `sqlite` | Storage backend: `sqlite`, `seekdb`, or `oceanbase` |
 | `POWERCONTEXT_SERVER_DATABASE_URL` | user data SQLite file | SQLAlchemy async URL for SQLite or OceanBase; do not set for seekdb |
 | `POWERCONTEXT_SERVER_DATABASE_PATH` | user data `seekdb` directory | Embedded seekdb path; used only when `DATABASE_KIND=seekdb` |
 | `POWERCONTEXT_SERVER_DATABASE_BUSY_TIMEOUT_MS` | `5000` | Milliseconds a business connection waits for SQLite's single write lock before raising; it does not govern usage accounting, which has its own bounded budget |
-| `POWERCONTEXT_SERVER_DEPLOYMENT_MODE` | `single_node` | `single_node` or `distributed` process topology |
-| `POWERCONTEXT_SERVER_DEPLOYMENT_ROLE` | `all` | `all`, `api`, `scheduler`, or `worker`; distributed mode forbids `all` |
-| `POWERCONTEXT_SERVER_DEPLOYMENT_ID` | `local` | Non-secret operator instance label; boot ownership remains unique |
-| `POWERCONTEXT_SERVER_DEPLOYMENT_BEHAVIOR_REVISION` | `default` | Non-secret rollout compatibility revision shared by all replicas |
-| `POWERCONTEXT_SERVER_COORDINATION_SCHEDULER_LEASE_SECONDS` | `30` | Scheduler leader lease duration using database time |
-| `POWERCONTEXT_SERVER_COORDINATION_SCHEDULER_RENEW_SECONDS` | `10` | Scheduler renewal interval; at most one third of the lease |
-| `POWERCONTEXT_SERVER_COORDINATION_SCAN_PAGE_SIZE` | `100` | Maximum scopes inspected in one discoverer page |
-| `POWERCONTEXT_SERVER_COORDINATION_MEMBER_TTL_SECONDS` | `30` | Runtime member advertisement lifetime |
-| `POWERCONTEXT_SERVER_COORDINATION_MEMBER_HEARTBEAT_SECONDS` | `10` | Runtime member heartbeat interval |
-| `POWERCONTEXT_SERVER_COORDINATION_EMIT_PAYLOAD_VERSION` | `1` | Work payload version emitted during a rolling deployment |
-| `POWERCONTEXT_SERVER_WORKER_CONCURRENCY` | `4` | Maximum attempts executed concurrently by one Worker |
-| `POWERCONTEXT_SERVER_WORKER_LEASE_SECONDS` | `120` | Worker claim lease duration |
-| `POWERCONTEXT_SERVER_WORKER_HEARTBEAT_SECONDS` | `30` | Claim heartbeat interval; less than one third of the lease |
-| `POWERCONTEXT_SERVER_WORKER_SHUTDOWN_GRACE_SECONDS` | `90` | Maximum graceful drain time; less than the lease |
-| `POWERCONTEXT_SERVER_WORKER_MAX_ATTEMPTS` | `5` | Automatic attempt budget before operator recovery is required |
-| `POWERCONTEXT_SERVER_WORKER_RETRY_BASE_SECONDS` | `2` | Full-jitter exponential retry base |
-| `POWERCONTEXT_SERVER_WORKER_RETRY_MAX_SECONDS` | `300` | Full-jitter retry ceiling |
-| `POWERCONTEXT_SERVER_WORKER_POLL_SECONDS` | `1` | Idle claim polling interval |
-| `POWERCONTEXT_SERVER_OPERATIONS_DEFAULT_WAIT_SECONDS` | `10` | Default HTTP Memory flush wait |
-| `POWERCONTEXT_SERVER_OPERATIONS_MAXIMUM_WAIT_SECONDS` | `30` | Maximum accepted `Prefer: wait=N` value |
-| `POWERCONTEXT_SERVER_OPERATIONS_POLL_SECONDS` | `0.2` | Local operation completion polling interval |
-| `POWERCONTEXT_SERVER_OPERATIONS_RETENTION_DAYS` | `30` | Successful and cancelled operation history retention |
-| `POWERCONTEXT_SERVER_OPERATIONS_CLEANUP_BATCH_SIZE` | `500` | Maximum records removed by one maintenance attempt |
-| `POWERCONTEXT_SERVER_OPERATIONS_CLEANUP_INTERVAL_SECONDS` | `3600` | Durable maintenance discovery interval |
-| `POWERCONTEXT_SERVER_RATE_LIMIT_ENABLED` | `false` | Enable shared database fixed-window limiting |
-| `POWERCONTEXT_SERVER_RATE_LIMIT_REQUESTS` | `120` | Requests allowed for one principal and policy window |
-| `POWERCONTEXT_SERVER_RATE_LIMIT_WINDOW_SECONDS` | `60` | Shared rate-limit window duration |
 | `POWERCONTEXT_SERVER_RUNTIME_SCOPE_CACHE_SIZE` | `128` | Inactive scope compositions retained by the Runtime; in-flight scopes are never evicted |
-| `POWERCONTEXT_SERVER_RUNTIME_SOURCE_WINDOW_LIMIT` | `100` | Maximum Sources processed in one activation |
+| `POWERCONTEXT_SERVER_RUNTIME_SOURCE_WINDOW_LIMIT` | `100` | Maximum Source journal positions per activation; Memory reduces its window after generation timeouts |
 | `POWERCONTEXT_SERVER_RUNTIME_CONTEXT_ASSEMBLY_MAX_ENTRIES` | `8` | Maximum sum of explicit `assembly.sections[].limit`; positive integer. Per-family limits still apply. |
 | `POWERCONTEXT_SERVER_RUNTIME_MEMORY_EXTRACTION_PROFILE` | `coding` | Memory selection policy: `coding` or `conversation` |
 | `POWERCONTEXT_SERVER_RUNTIME_MEMORY_RERANK_ENABLED` | `false` | Apply listwise reranking after coarse Memory retrieval |
 | `POWERCONTEXT_SERVER_RUNTIME_MEMORY_RERANK_CANDIDATE_LIMIT` | `30` | Coarse candidate pool supplied to the reranker |
+| `POWERCONTEXT_SERVER_RUNTIME_DECISION_ASSISTANCE_ENABLED` | `false` | Enable decision-model assistance; requires a decision or generation model |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_WRITE_GATE_ENABLED` | `false` | Enable the fail-open Memory write decision gate |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_WRITE_GATE_HOLD_ON` | `yes` | Decision outcome that means evidence is insufficient: `yes` or `no` |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_WRITE_GATE_THRESHOLD` | unset | Optional confidence threshold from `0` to `1`; a hold-direction verdict below it is flagged instead of held |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_WRITE_GATE_PRIVACY_BOUNDARY` | `no_external_call` | Decision egress boundary: `no_external_call` or `hosted_redacted` |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_WRITE_GATE_SANITIZER` | `none` | Required for `hosted_redacted`; choose `known_secrets` to install the built-in projection sanitizer |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_MAX_ACTIVE_ENTRIES` | `5000` | Legacy collection setting; does not limit Atomic Memory, but parsing still validates it against the manifest limit |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_MAX_MANIFEST_ENTRIES` | `10000` | Legacy collection setting; Atomic Memory has no collection manifest |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_MAX_MANIFEST_BYTES` | `4194304` | Legacy collection setting; does not limit total Atomic Memory content |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_COMPACTION_ENABLED` | `false` | Legacy collection setting; Atomic Runtime has no compact operation |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_COMPACTION_MIN_TOMBSTONE_REVISIONS` | `10` | Legacy collection setting; Atomic Runtime has no compact operation |
+| `POWERCONTEXT_SERVER_RUNTIME_MEMORY_MAX_HISTORY_REVISIONS` | `100` | Maximum Memory history Revisions read by the Runtime |
 | `POWERCONTEXT_SERVER_RUNTIME_RECALL_GATE_ENABLED` | `false` | Enable the optional recall-sufficiency gate; disabling it keeps recall identical to a deployment without the feature |
 | `POWERCONTEXT_SERVER_RUNTIME_RECALL_GATE_MAX_ROUNDS` | `2` | Most expansion rounds after the first recall; `0` to `2`, where `0` assesses without expanding |
 | `POWERCONTEXT_SERVER_RUNTIME_RECALL_GATE_MIN_CANDIDATES` | `2` | Fewest candidates a recall needs to count as sufficient |
@@ -114,6 +173,9 @@ Server settings use the `POWERCONTEXT_SERVER_` prefix.
 | `POWERCONTEXT_SERVER_RUNTIME_RECALL_GATE_ROUND1_MIN_SEMANTIC_SIMILARITY` | `0.15` | Semantic-similarity admission floor for the first expansion round; must not exceed the round-zero `0.3` |
 | `POWERCONTEXT_SERVER_RUNTIME_RECALL_GATE_ROUND2_MIN_SEMANTIC_SIMILARITY` | `0.10` | Semantic-similarity admission floor for the second expansion round; must not exceed the first round's value |
 | `POWERCONTEXT_SERVER_RUNTIME_RECALL_GATE_ALLOW_WITH_RERANK` | `false` | Whether expansion may still run when `MEMORY_RERANK_ENABLED` is set; by default reranking ends the expansion |
+| `POWERCONTEXT_SERVER_RUNTIME_RECALL_FTS_WEIGHT` | `1.0` | Relative FTS contribution in hybrid Atomic Memory and Topic Memory RRF; `0` excludes FTS-only matches from hybrid results |
+| `POWERCONTEXT_SERVER_RUNTIME_RECALL_VECTOR_WEIGHT` | `1.0` | Relative vector contribution in hybrid Atomic Memory and Topic Memory RRF; `0` excludes vector-only matches from hybrid results |
+| `POWERCONTEXT_SERVER_RUNTIME_RECALL_EMBEDDING_TIMEOUT_SECONDS` | `0.25` | Seconds each Atomic Memory or Topic Memory search inside a context preparation waits for the query embedding, at most `60`. A preparation searches the Scope and each of its context references in turn, so the waits add up. When a budget expires, that search continues with lexical matching only and logs `memory.search.embedding_fallback` or `topic_memory.search.embedding_fallback`. A remote embedding provider needs more than the default; keep the summed waits inside the host's Hook request timeout, 3 seconds on most hosts |
 | `POWERCONTEXT_SERVER_RUNTIME_MEMORY_SCHEDULE_SECONDS` | unset | Memory automatic admission interval; `SCHEDULE_SECONDS` remains a compatibility alias |
 | `POWERCONTEXT_SERVER_RUNTIME_TOPIC_MEMORY_SCHEDULE_SECONDS` | unset | Topic Memory automatic admission interval; unset disables new automatic admission |
 | `POWERCONTEXT_SERVER_RUNTIME_TOPIC_MEMORY_SOURCE_WINDOW_LIMIT` | `10` | Maximum Sources per Topic Memory Window, capped at 100; one Scope invocation can finish several Windows |
@@ -122,7 +184,7 @@ Server settings use the `POWERCONTEXT_SERVER_` prefix.
 | `POWERCONTEXT_SERVER_RUNTIME_TOPIC_MEMORY_HISTORY_MIN_CANDIDATES` | `5` | Minimum historical recall count when the threshold returns too few candidates |
 | `POWERCONTEXT_SERVER_RUNTIME_TOPIC_MEMORY_MAX_WORKERS` | `10` | Topic Worker quota; `ARTIFACT_PROCESSING_MAX_WORKERS` is its compatibility alias |
 | `POWERCONTEXT_SERVER_RUNTIME_TOPIC_MEMORY_WORKER_TIMEOUT_SECONDS` | `600` | Total Scope invocation timeout, including child startup; old `ARTIFACT_PROCESSING_WORKER_TIMEOUT_SECONDS` is its alias |
-| `POWERCONTEXT_SERVER_RUNTIME_ARTIFACT_PROCESSING_ROLE` | `all` | Single-node Supervisor role: `all`, `api`, or `background`; distributed mode requires `all` because `DEPLOYMENT_ROLE` owns process separation |
+| `POWERCONTEXT_SERVER_RUNTIME_ARTIFACT_PROCESSING_ROLE` | `all` | Process role: `all`, `api`, or `background` |
 | `POWERCONTEXT_SERVER_RUNTIME_ARTIFACT_PROCESSING_SUPERVISOR_MODE` | `global` | `global` owns one Lease; `dedicated` owns one Lease per registered Family |
 | `POWERCONTEXT_SERVER_RUNTIME_ARTIFACT_PROCESSING_FAMILIES` | inferred from models | JSON Family list; API-only instances can declare capabilities without model credentials |
 | `POWERCONTEXT_SERVER_RUNTIME_MEMORY_MAX_WORKERS` | `1` | Independent Memory Worker quota |
@@ -146,6 +208,8 @@ Server settings use the `POWERCONTEXT_SERVER_` prefix.
 | `POWERCONTEXT_SERVER_INFERENCE_GENERATION_MODEL_SETTINGS` | `{}` | JSON object of Pydantic AI generation model settings |
 | `POWERCONTEXT_SERVER_INFERENCE_GENERATION_TIMEOUT_SECONDS` | `30` | Timeout in seconds for one structured generation operation |
 | `POWERCONTEXT_SERVER_INFERENCE_GENERATION_MAX_REQUESTS` | `2` | Maximum provider requests for one structured generation operation, including retries |
+| `POWERCONTEXT_SERVER_INFERENCE_GENERATION_STREAMING` | `disabled` | When `auto`, only generation models whose provider prefix is `anthropic`, `openai`, `openai-chat`, or `openai-responses` use a streamed request aggregated locally into one complete response. Other prefixes stay on non-streaming requests. `disabled` keeps every model on non-streaming requests |
+| `POWERCONTEXT_SERVER_INFERENCE_GENERATION_STREAM_IDLE_TIMEOUT_SECONDS` | `60` | Maximum idle seconds while aggregating a streamed request: while the stream opens and waits for its first model event, and between model events (text, thinking, or tool-call parts). Provider heartbeat frames do not reset this timer; a longer gap fails as a timeout |
 | `POWERCONTEXT_SERVER_INFERENCE_GENERATION_MODEL_CONTEXT_WINDOW_TOKENS` | `125000` | Total generation-model context window used to budget Topic processing |
 | `POWERCONTEXT_SERVER_INFERENCE_EMBEDDING_MODEL` | unset | Pydantic AI embedding model; requires profile ID and dimension |
 | `POWERCONTEXT_SERVER_INFERENCE_EMBEDDING_BASE_URL` | provider default | Custom OpenAI-compatible embeddings base URL |
@@ -163,8 +227,31 @@ Server settings use the `POWERCONTEXT_SERVER_` prefix.
 | `POWERCONTEXT_SERVER_INFERENCE_RERANK_MODEL_SETTINGS` | `{}` | JSON object of Pydantic AI reranker model settings |
 | `POWERCONTEXT_SERVER_INFERENCE_RERANK_TIMEOUT_SECONDS` | generation timeout | LLM reranker timeout |
 | `POWERCONTEXT_SERVER_INFERENCE_RERANK_MAX_REQUESTS` | generation request limit | Maximum model requests in one rerank operation |
+| `POWERCONTEXT_SERVER_INFERENCE_DECISION_MODEL` | generation model | Optional dedicated Pydantic AI model for decision assistance and the Memory write gate |
+| `POWERCONTEXT_SERVER_INFERENCE_DECISION_BASE_URL` | inherited/provider default | Custom decision-model provider base URL; requires `DECISION_MODEL` |
+| `POWERCONTEXT_SERVER_INFERENCE_DECISION_HEADERS` | `{}` | JSON object of static decision client headers; values are secrets and inherit generation headers when no dedicated model is set |
+| `POWERCONTEXT_SERVER_INFERENCE_DECISION_MODEL_SETTINGS` | `{}` | JSON object of decision model settings; merged with generation settings when no dedicated model is set |
+| `POWERCONTEXT_SERVER_INFERENCE_DECISION_TIMEOUT_SECONDS` | generation timeout | Timeout in seconds for a decision operation |
+| `POWERCONTEXT_SERVER_INFERENCE_DECISION_MAX_REQUESTS` | generation request limit | Maximum model requests for one decision operation, including model-output validation retries; excludes provider SDK HTTP retries |
 | `POWERCONTEXT_SERVER_RUNTIME_EXPERIENCE_SCHEDULE_SECONDS` | unset | Experience automatic admission interval; unset preserves accepted work and stops new automatic admission |
 | `POWERCONTEXT_SERVER_EXTERNAL_SKILLS` | automatic local project targets | JSON override containing the host identity and explicit Agent Skill targets |
+
+The recall channel weights are a ratio and apply to Atomic Memory and Topic Memory only after hybrid candidates pass
+their channel admission floors. Single-channel searches remain unweighted; `auto` applies the weights only when it
+selects hybrid search. Atomic Memory excludes zero-weight channels from `matched_by` and recall-gate relevance.
+Topic Memory retains their evidence for Topics selected by a positive-weight channel.
+Scaling both values equally has no effect. Setting one value to `0` excludes that channel from hybrid fusion, but a
+higher weight cannot restore a candidate rejected before fusion. A zero weight does not disable that channel's
+retrieval or admission work: vector embeddings may still be generated, and retrieval/admission counts still include
+the zero-weight channel. A Topic or Atomic Memory Artifact search request that supplies its own `fusion` parameters replaces the
+deployment recall weights entirely. The deployment weights apply only when the request does not specify `fusion`
+parameters. After normalization, each non-zero channel weight must be at least the smallest normal IEEE 754 binary64
+value (`2.2250738585072014e-308`); smaller values are rejected at startup. Only an explicit `0` disables a channel's
+fusion contribution. Evaluate weight changes together with recall-gate rounds, semantic admission floors, and
+historical Topic candidate selection instead of treating the knobs independently. In particular, weighting FTS more
+heavily can move a Topic's normalized score across
+`POWERCONTEXT_SERVER_RUNTIME_TOPIC_MEMORY_HISTORY_RRF_THRESHOLD` (default `70`) and change which historical Topics
+are sent to the planner.
 
 The recall-sufficiency gate is disabled by default. When enabled, the Runtime assesses the first recall's candidate
 count, family coverage, top-candidate score, and lexical coverage during `prepare_context`; when it judges the result
@@ -173,6 +260,19 @@ assessment calls no model, and expansion reuses the same request's Scope, famili
 with the query vectors already produced. The round-one and round-two similarity floors must stay in decreasing order, or
 startup fails. Enabling the gate can add search rounds and latency, so evaluate retrieval results and latency on your own
 data.
+
+When the gate produces a `RecallEffort`, the relational Runtime adds one observation to `pc_recall_effort_daily`, keyed by
+`(scope_id, usage_date, policy_id, assessment)`. Dates use UTC. The additive counters describe committed search rounds,
+expansion actions, candidate-pool sizes, search-reported additional inference calls, and final byte-budget truncations and
+drops. The two drop subclasses sum to `dropped_items`; invalid counts are rejected before persistence. The table contains
+only its key dimensions and counters, without entry identities, queries, prompts, citations, or content bodies. It is an
+internal aggregate and is not included in the statistics overview or HTTP/MCP responses.
+
+Recall-effort recording makes one write attempt within `POWERCONTEXT_SERVER_RUNTIME_MODEL_USAGE_WRITE_TIMEOUT_SECONDS`.
+A failed write logs a safe diagnostic and preserves the prepared context. Request cancellation waits for the owned
+transaction's native cleanup before propagating, preserving a shared in-memory SQLite database. A caller-supplied
+`recall_effort_sink` replaces the relational recorder; a disabled gate invokes neither. Existing SQLite and OceanBase
+databases gain the missing relation through the normal additive table-creation path.
 
 Model usage accounting is best-effort and never gates a model call. Each Runtime owns one bounded recorder that accepts a
 record without any I/O and writes it in an independent short transaction, so a statistics outage, a full queue, or a lock
@@ -252,9 +352,35 @@ family, or disabling built-in background families with `ARTIFACT_PROCESSING_FAMI
 before accepting work. Turning off schedules alone is insufficient because explicit requests still start workers.
 Custom Source registries remain available to synchronous SDK contexts and API-only composition.
 
-The authenticated `/metrics` endpoint exposes `powercontext_server_artifact_processing_*` observations with only a `family`
-label: Worker capacity, ready/retry queues, unacknowledged Scopes, discovery and invocation duration, completions,
+The authenticated `/metrics` endpoint exposes `powercontext_server_artifact_processing_*` observations with a bounded `family`
+label and, where applicable, `state`, `outcome`, `category`, or `reason`: Worker capacity, ready/retry queues,
+unacknowledged Scopes, discovery and invocation duration, completions,
 failures, and timeouts. Unacknowledged counts reflect the latest discovery; counters reset with the Supervisor instance.
+See [Logs, metrics, and tracing](observability.md) for freshness, state, attempt/acknowledgement, and alert semantics.
+
+The `extraction` object in `GET /v1/capabilities` separates configuration, background execution, and local observations.
+Reading this snapshot does not query the database or call a model, and does not produce an overall health verdict.
+`powercontext capabilities` prints the same facts. Missing diagnostics print `unavailable`, a null supervisor role
+prints `absent`, and unknown values print `unknown`. Success and failure times are historical observations, not a
+current health verdict. `--json` returns the Server payload unchanged.
+
+- `configuration` is `configured` when a local extraction model or custom pipeline is assembled, or a local Memory
+  worker is registered. It is `unconfigured` when none is available. Registration does not verify credentials or
+  connectivity. External execution reports `unknown`.
+- `background.location` is `local`, `external`, or `none`. The local Supervisor's `role` (`leader` or `standby`) is
+  separate from its `state` (`running`, `degraded`, or `stopped`); standby is normal. A worker crash can coexist with a
+  running Supervisor that arranges retries. `automatic_processing_enabled=false` still permits explicit work.
+  External execution has unknown state and schedule; no running local Supervisor means a null role.
+- `observation.since` marks the start of this Runtime's local observation window, including its child Memory workers.
+  `status=unverified` means no execution outcome or control failure has been observed; `observed` means evidence exists.
+  `last_success_at` records a successful nonempty flush or acknowledged worker invocation. `last_failure` records a safe
+  `code`, `stage`, and `occurred_at`, such as `model_timeout` at `inference` or `worker_crash` at `worker`.
+  Generic failures retain the observing boundary (`flush` or `worker`) without assuming a model failure.
+
+Success and failure records are independent: Scope B succeeding does not clear Scope A's failure or prove its recovery.
+A historical failure also does not mean an incident is still unresolved. Observations reset on Runtime restart and do
+not prove model connectivity or remote worker health. Use structured logs for Scope-specific failures and retries, and
+the existing metrics for queue and progress observations; local ready counts are not a global Source backlog.
 
 Remote and multi-user deployments must use `enforced`. In that mode, HTTP, MCP, and metrics share one Server PEP.
 `/v1/access/me` reports the `server`/`scope`/`artifact` Resource Kinds,
@@ -321,24 +447,22 @@ terminating TLS in front of a loopback-bound Server whenever the deployment perm
 Handoff Report API routes are independently enabled by default. See
 [Use Handoff Report](../workflows/use-handoff-report.md) for selection, inspection, and export.
 
-The Artifact Processing Supervisor is enabled by the default `all` role in `single_node` deployment mode. A single-node
-OceanBase deployment may split that Supervisor into `api` and `background` runtime roles;
-`powercontext server run --role background` starts no HTTP, MCP, or Dashboard listener, and multiple background
-candidates use the database Lease to elect one active Leader. This split is distinct from
-`POWERCONTEXT_SERVER_DEPLOYMENT_MODE=distributed`, where `DEPLOYMENT_ROLE` selects `api`, `scheduler`, or `worker`, and
-`ARTIFACT_PROCESSING_ROLE` must remain `all`.
-
-In single-node mode, Memory, Topic Memory, Experience, and Profile use the Supervisor. In distributed mode, Memory,
-Experience, and Profile use the Work Ledger instead; Topic Memory processing is not supported in distributed v1 and a
-configured Topic Memory schedule is rejected at startup. SQLite and embedded seekdb support only the single-process
-`all` role. Automatic Topic Memory waves remain disabled until a positive interval is set; explicit flush work remains
-recoverable regardless of that interval. Topic workers need file-backed SQLite: configuring a generation model with an
-in-memory SQLite database is rejected before processing is advertised. Use a persistent
-`POWERCONTEXT_SERVER_DATABASE_URL`, such as `sqlite+aiosqlite:////srv/powercontext/runtime.db`. Every Supervisor Family
-has its own quota and timeout; spare quota is not shared. Disabling automatic admission preserves already accepted
-requests. Split Supervisor API and background instances must agree on mode, registered Families, and trigger
-capabilities. Model resources are only required by execution processes. Changing Supervisor modes requires
-[coordinated offline migration](artifact-processing-migration.md); mixed modes cannot start.
+The Artifact Processing Supervisor is enabled by the default `all` role. OceanBase deployments may run `api` and
+`background` separately. When metrics are enabled, `powercontext server run --role background` exposes `/metrics` and
+public `/health/live` using `POWERCONTEXT_SERVER_HTTP_HOST` and `POWERCONTEXT_SERVER_METRICS_BACKGROUND_PORT`
+(default `8001`); it does not serve business APIs, MCP, Dashboard, OpenAPI, or `/health/ready`.
+`/metrics` uses the same authentication and `server.observe` authorization as the API host.
+Use distinct ports for API and background processes on the same host. `POWERCONTEXT_SERVER_METRICS_ENABLED=false`
+opens no background listener. Multiple background candidates use the database Lease to elect one active Leader.
+SQLite and embedded seekdb support only the single-process `all` role. Automatic Topic Memory waves remain disabled until a positive interval is set;
+explicit flush work remains recoverable regardless of that interval. Topic workers need file-backed SQLite: configuring
+a generation model with an in-memory SQLite database is rejected before processing is advertised. Use a persistent
+`POWERCONTEXT_SERVER_DATABASE_URL`, such as `sqlite+aiosqlite:////srv/powercontext/runtime.db`.
+Memory, Topic Memory, Experience, and Profile all use the Supervisor. OceanBase permits their schedules in split roles.
+SQLite and embedded seekdb retain one `all` host. Every Family has its own quota and timeout in both modes; spare quota
+is not shared. Disabling automatic admission preserves already accepted requests. The API and background instances must
+agree on mode, registered Families and trigger capabilities. Model resources are only required by workers. Changing modes
+requires [coordinated offline migration](artifact-processing-migration.md); mixed modes cannot start.
 Conflicting explicit old/new configuration aliases fail startup; equal values are accepted.
 
 Normal Runtime startup initializes and recovers the configured search indexes. Topic Workers reuse that database
@@ -387,6 +511,18 @@ The built-in reranker is an LLM listwise reranker, not a dedicated cross-encoder
 generation model and its provider settings. Set `POWERCONTEXT_SERVER_INFERENCE_RERANK_MODEL` to give that LLM operation
 an independent model, base URL, headers, settings, timeout, and request limit.
 
+Python deployments can inject the optional `JevMemoryReranker` with a
+`JevRerankConfig` and a caller-owned HTTPX client into
+`open_builtin_runtime(memory_reranker=...)`. It requires a dedicated API key,
+System One endpoint, and pinned model such as `jev-1.13.0`. Its total deadline
+and concurrency/request-size bounds are explicit. Provider failures propagate as
+inference errors under RFC 0080, including timeouts, unavailable providers, invalid
+scores, missing usage receipts, and model-version drift. Injected rerankers also
+disable recall expansion unless the existing `RECALL_GATE_ALLOW_WITH_RERANK`
+setting enables it. The Server environment switch above selects the existing LLM
+reranker. See `evaluation/memory/locomo/README.md` in the repository for Jev
+configuration, the three-arm comparison, and execution coverage.
+
 The same configured generation model gates explicit Experience generation, managed Skill generation, and semantic
 Skill fork/evolution. Exact external Skill import and complete package upload do not use a model: PowerContext validates
 and stores the canonical package bytes, then creates a pending Candidate with the same package digest. Without a
@@ -397,22 +533,9 @@ Experience incubation has its own Supervisor binding and persisted Source cursor
 finite window controlled by `SOURCE_WINDOW_LIMIT` and exposes only Content Sources whose metadata contains
 `"kind": "task-outcome"` to the model. It creates pending Experience Candidates in the Review Inbox; it does not
 approve them, place them in PreparedContext, create a managed Skill, export it to an Agent target, or execute anything.
-Memory and Experience keep independent scheduling intervals, Worker quotas, and business cursors. In distributed mode,
-their accepted operations use independent Work Ledger lanes and logical keys. Unsetting an interval stops new automatic
-admission for that Family while preserving accepted work.
+Memory and Experience keep independent scheduling intervals, Worker quotas, and business cursors. Unsetting an interval
+stops new automatic admission for that Family while preserving accepted work.
 See [Create and review an Experience](../workflows/create-and-review-experience.md) for setup and verification steps.
-
-### Distributed roles and migrations
-
-Distributed mode requires OceanBase. Run `powercontext server migrate --env-file ...` with a DDL-capable account before
-starting any role. Role processes never create or alter schema. Start or roll forward in this order: migrate, Workers,
-Schedulers, then APIs. Use a new `POWERCONTEXT_SERVER_DEPLOYMENT_BEHAVIOR_REVISION` when a rollout changes non-secret
-behavior that must not mix across replicas.
-
-An API replica can remain ready enough to accept durable work while Scheduler or Worker members are absent; readiness
-is `degraded` and names the missing role. Scheduler and Worker roles expose health and metrics only. Distributed MCP is
-stateless and needs no load-balancer affinity. Host-local External Skill targets are rejected because replicas could
-otherwise return different results.
 
 ### Agent Skill targets
 

@@ -16,13 +16,16 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from typing import Any
-from uuid import UUID
 
 from pydantic import ValidationError
 
 from powercontext.artifacts import ArtifactRef
+from powercontext.artifacts.search import ArtifactSearchOutcome
+from powercontext.builtin.artifacts.atomic_memory.models import (
+    AtomicMemoryContent as RuntimeAtomicMemoryContent,
+)
+from powercontext.builtin.artifacts.atomic_memory.models import AtomicMemoryMutationResult
 from powercontext.builtin.artifacts.experience import (
     Experience,
     ExperienceContent,
@@ -37,6 +40,7 @@ from powercontext.builtin.artifacts.handoff.generation_metadata import (
 )
 from powercontext.builtin.artifacts.profile.models import ProfileCandidateProposal as RuntimeProfileCandidateProposal
 from powercontext.builtin.artifacts.profile.models import ProfileWriteContent as RuntimeProfileWriteContent
+from powercontext.builtin.artifacts.prompt.models import PromptContent as RuntimePromptContent
 from powercontext.builtin.artifacts.skill import (
     ExternalSkillProviderScan,
     Skill,
@@ -50,10 +54,16 @@ from powercontext.builtin.artifacts.skill import (
     ExternalSkillResolution as RuntimeExternalSkillResolution,
 )
 from powercontext.builtin.artifacts.topic_memory import PublishedTopicMemory, TopicMemorySearchResult
+from powercontext.builtin.artifacts.topic_memory.models import TopicMemoryContent as RuntimeTopicMemoryContent
+from powercontext.builtin.catalog_changes.models import (
+    CatalogChangeCandidate as RuntimeTagCandidate,
+)
+from powercontext.builtin.catalog_changes.models import (
+    CatalogChangeProposal as RuntimeTagProposal,
+)
 from powercontext.builtin.persistence.artifact_governance import ArtifactGovernance
-from powercontext.builtin.persistence.work import StoredWork
-from powercontext.builtin.review import ArtifactCandidate as RuntimeArtifactCandidate
-from powercontext.builtin.review import ArtifactCandidatePage as RuntimeArtifactCandidatePage
+from powercontext.builtin.review import Candidate as RuntimeCandidate
+from powercontext.builtin.review import CandidatePage as RuntimeCandidatePage
 from powercontext.builtin.review import CandidateStatus as RuntimeCandidateStatus
 from powercontext.builtin.review.generation import (
     GeneratedCandidateResult as RuntimeGeneratedCandidateResult,
@@ -62,39 +72,33 @@ from powercontext.builtin.review.generation import SkillGenerationOrigin as Runt
 from powercontext.builtin.runtime import (
     ActivateHandoff,
     CaptureSource,
-    ExperienceIncubationResult,
+    CaptureWorkingNote,
     Handoff,
     HandoffActivation,
     HandoffArtifactCitation,
     HandoffContent,
     HandoffDraft,
     HandoffEvidenceCheck,
-    HandoffMemoryCitation,
     HandoffOmission,
     HandoffResolution,
     HandoffSourceCitation,
     HandoffStatement,
     InvalidRuntimeRequestError,
     MemoryChange,
-    MemoryChangesPage,
-    MemoryEntriesPage,
-    MemoryEntryInput,
-    MemoryEntryRecord,
     MemoryFlushResult,
-    MemoryHit,
-    MemoryMutationResult,
-    MemorySearchPage,
     PrepareContextRequest,
     PreparedContext,
     PreparedHandoff,
     PrepareHandoff,
-    RememberMemoryRequest,
     SourceReceipt,
     TopicMemoryFlushResult,
 )
 from powercontext.builtin.runtime import (
-    ApproveArtifactCandidateRequest as RuntimeApproveArtifactCandidateRequest,
+    ApproveCandidateRequest as RuntimeApproveCandidateRequest,
 )
+from powercontext.builtin.runtime import BootstrapContext as RuntimeBootstrapContext
+from powercontext.builtin.runtime import BootstrapContextRequest as RuntimeBootstrapContextRequest
+from powercontext.builtin.runtime import BootstrapDeliveryReceipt as RuntimeBootstrapDeliveryReceipt
 from powercontext.builtin.runtime import (
     CommitConnectorCheckpoint as RuntimeCommitConnectorCheckpoint,
 )
@@ -108,13 +112,10 @@ from powercontext.builtin.runtime import (
     GenerateSkillRequest as RuntimeGenerateSkillRequest,
 )
 from powercontext.builtin.runtime import (
-    GetArtifactCandidateRequest as RuntimeGetArtifactCandidateRequest,
+    GetCandidateRequest as RuntimeGetCandidateRequest,
 )
 from powercontext.builtin.runtime import (
     GetExperienceRequest as RuntimeGetExperienceRequest,
-)
-from powercontext.builtin.runtime import (
-    GetMemoryEntryRequest as RuntimeGetMemoryEntryRequest,
 )
 from powercontext.builtin.runtime import GetSkillRequest as RuntimeGetSkillRequest
 from powercontext.builtin.runtime import GetTopicMemoryRequest as RuntimeGetTopicMemoryRequest
@@ -122,34 +123,20 @@ from powercontext.builtin.runtime import (
     ImportExternalSkillRequest as RuntimeImportExternalSkillRequest,
 )
 from powercontext.builtin.runtime import (
-    ListArtifactCandidatesRequest as RuntimeListArtifactCandidatesRequest,
+    ListCandidatesRequest as RuntimeListCandidatesRequest,
 )
 from powercontext.builtin.runtime import ListExternalSkillsRequest as RuntimeListExternalSkillsRequest
-from powercontext.builtin.runtime import (
-    MemoryCitation as RuntimeMemoryCitation,
-)
-from powercontext.builtin.runtime import (
-    MemoryRevisionChanges as RuntimeMemoryRevisionChanges,
-)
 from powercontext.builtin.runtime import (
     ProposeExperienceRequest as RuntimeProposeExperienceRequest,
 )
 from powercontext.builtin.runtime import ProposeSkillRequest as RuntimeProposeSkillRequest
+from powercontext.builtin.runtime import RecordBootstrapDeliveryRequest as RuntimeRecordBootstrapDeliveryRequest
 from powercontext.builtin.runtime import (
-    RejectArtifactCandidateRequest as RuntimeRejectArtifactCandidateRequest,
+    RejectCandidateRequest as RuntimeRejectCandidateRequest,
 )
 from powercontext.builtin.runtime import ResolveExternalSkillRequest as RuntimeResolveExternalSkillRequest
 from powercontext.builtin.runtime import (
-    RetireMemoryEntryRequest as RuntimeRetireMemoryEntryRequest,
-)
-from powercontext.builtin.runtime import (
-    ReviseArtifactCandidateRequest as RuntimeReviseArtifactCandidateRequest,
-)
-from powercontext.builtin.runtime import (
-    ReviseMemoryEntryRequest as RuntimeReviseMemoryEntryRequest,
-)
-from powercontext.builtin.runtime import (
-    SearchMemoryRequest as RuntimeSearchMemoryRequest,
+    ReviseCandidateRequest as RuntimeReviseCandidateRequest,
 )
 from powercontext.builtin.runtime import SearchTopicMemoryRequest as RuntimeSearchTopicMemoryRequest
 from powercontext.builtin.runtime import (
@@ -158,9 +145,9 @@ from powercontext.builtin.runtime import (
 from powercontext.builtin.runtime import (
     SubmitSourceObservation as RuntimeSubmitSourceObservation,
 )
-from powercontext.builtin.runtime.work_handlers import EXPERIENCE_WORK_KIND, MEMORY_WORK_KIND
+from powercontext.builtin.runtime import WorkingNoteKind as RuntimeWorkingNoteKind
+from powercontext.builtin.runtime.atomic_memory import AtomicMemoryPage, AtomicMemorySearchPage
 from powercontext.builtin.sources import ExternalSkillImportMode as RuntimeExternalSkillImportMode
-from powercontext.builtin.tags import TagFilter
 from powercontext.builtin.work import (
     AcknowledgeHandoff as RuntimeAcknowledgeHandoff,
 )
@@ -187,15 +174,20 @@ from powercontext.builtin.work import WorkSourceReceipt as RuntimeWorkSourceRece
 from powercontext.http import (
     AcknowledgeHandoffRequest,
     ActivateHandoffRequest,
-    ApproveArtifactCandidateRequest,
-    ArtifactCandidate,
-    ArtifactCandidatePage,
+    ApproveCandidateRequest,
     ArtifactReference,
+    BootstrapDeliveryReceipt,
+    Candidate,
+    CandidateAudit,
     CandidateFamily,
+    CandidateKind,
+    CandidatePage,
     CandidateStatus,
     CaptureContentSourceRequest,
     CaptureContentSourceResponse,
     CaptureStatus,
+    CaptureWorkingNoteRequest,
+    CatalogChangeProposal,
     CommitConnectorCheckpointRequest,
     CommittedHandoff,
     ConnectorCheckpointState,
@@ -203,7 +195,6 @@ from powercontext.http import (
     EntryChange,
     EntryChangeOperation,
     ExperienceArtifact,
-    ExperienceOperationResult,
     ExperienceProposal,
     ExternalSkillRegistration,
     ExternalSkillResolution,
@@ -215,10 +206,9 @@ from powercontext.http import (
     GeneratedCandidateStatus,
     GenerateExperienceRequest,
     GenerateSkillRequest,
-    GetArtifactCandidateRequest,
+    GetCandidateRequest,
     GetConnectorCheckpointRequest,
     GetExperienceRequest,
-    GetMemoryEntryRequest,
     GetSkillRequest,
     GetTopicMemoryRequest,
     HandoffAcknowledgement,
@@ -231,23 +221,12 @@ from powercontext.http import (
     HandoffSchema,
     HandoffSelection,
     ImportExternalSkillRequest,
-    ListArtifactCandidatesRequest,
+    ListCandidatesRequest,
     ListExternalSkillsRequest,
     ListExternalSkillsResponse,
-    ListMemoryChangesResponse,
     ListMemoryEntriesResponse,
     ManagedSkillLibraryEntry,
-    MemoryEntry,
-    MemoryEntryState,
-    MemoryMatchedBy,
     MemoryMutationResponse,
-    MemoryOperationResult,
-    MemoryRevisionChanges,
-    MemoryUsedSearchMode,
-    OperationError,
-    OperationKind,
-    OperationRecord,
-    OperationStatus,
     PreparedContextSchema,
     PreparedContextStatus,
     PreparedHandoffSchema,
@@ -255,18 +234,16 @@ from powercontext.http import (
     PrepareHandoffRequest,
     ProfileCandidateProposal,
     ProfileWriteContent,
+    PromptContent,
     ProposeExperienceRequest,
     ProposeSkillRequest,
     RecordTaskOutcomeRequest,
-    RejectArtifactCandidateRequest,
+    RejectCandidateRequest,
     ResolveExternalSkillRequest,
-    RetireMemoryEntryRequest,
-    ReviseArtifactCandidateRequest,
-    ReviseMemoryEntryRequest,
+    ReviseCandidateRequest,
     ScanExternalSkillsResponse,
     ScopedStats,
-    SearchMemoryHit,
-    SearchMemoryRequest,
+    SearchArtifactsResponse,
     SearchMemoryResponse,
     SearchTopicMemoryHit,
     SearchTopicMemoryRequest,
@@ -284,6 +261,7 @@ from powercontext.http import (
     SubmitSourceObservationRequest,
     TaskCheck,
     TopicMemoryArtifact,
+    TopicMemoryDreamProposal,
     TopicMemoryFlushStatus,
     TopicMemoryMatchedBy,
     TopicMemoryUsedSearchMode,
@@ -291,6 +269,11 @@ from powercontext.http import (
     WorkSourceKind,
     WorkSourceReceipt,
 )
+from powercontext.http import (
+    AtomicMemoryWriteContent as AtomicMemoryContent,
+)
+from powercontext.http import BootstrapContext as TransportBootstrapContext
+from powercontext.http import BootstrapContextRequest as TransportBootstrapContextRequest
 from powercontext.http import ConnectorBinding as HttpConnectorBinding
 from powercontext.http import (
     FailureRecord as TransportFailureRecord,
@@ -322,9 +305,6 @@ from powercontext.http import (
 from powercontext.http import HandoffGenerationEnvelope as TransportHandoffGenerationEnvelope
 from powercontext.http import HandoffGenerationMetadata as TransportHandoffGenerationMetadata
 from powercontext.http import (
-    HandoffMemoryCitation as TransportHandoffMemoryCitation,
-)
-from powercontext.http import (
     HandoffOmission as TransportHandoffOmission,
 )
 from powercontext.http import (
@@ -337,9 +317,6 @@ from powercontext.http import (
     HandoffStatement as TransportHandoffStatement,
 )
 from powercontext.http import (
-    MemoryCitation as TransportMemoryCitation,
-)
-from powercontext.http import (
     PrepareContextRequest as TransportPrepareContextRequest,
 )
 from powercontext.http import (
@@ -348,10 +325,9 @@ from powercontext.http import (
 from powercontext.http import (
     PreparedHandoff as TransportPreparedHandoff,
 )
-from powercontext.http import (
-    RememberMemoryRequest as TransportRememberMemoryRequest,
-)
+from powercontext.http import RecordBootstrapDeliveryRequest as TransportRecordBootstrapDeliveryRequest
 from powercontext.http import RepairSurface as TransportRepairSurface
+from powercontext.server.atomic_memory import record_response
 from powercontext.sources import (
     ConnectorBinding as RuntimeConnectorBinding,
 )
@@ -364,12 +340,51 @@ from powercontext.sources import (
 from powercontext.sources import SourceRef
 
 
+def artifact_search_response(outcome: ArtifactSearchOutcome, /, *, include_scores: bool) -> SearchArtifactsResponse:
+    """Serialize actual Artifact content while retaining the Family's final match order."""
+
+    results: list[dict[str, Any]] = []
+    for match, artifact in zip(outcome.matches, outcome.artifacts, strict=True):
+        item: dict[str, Any] = {
+            "family": artifact.family,
+            "artifact_id": artifact.artifact_id,
+            "revision": artifact.revision,
+            "content": artifact.content.model_dump(mode="json", by_alias=True, serialize_as_any=True),
+            "lineage": artifact.lineage.model_dump(mode="json", by_alias=True, serialize_as_any=True),
+        }
+        if include_scores:
+            if match.channel_scores is None:
+                raise ValueError("requested Artifact channel scores were not collected")  # noqa: TRY003
+            item["scores"] = {
+                "retrieval": match.retrieval_score,
+                "channels": {
+                    name: {"raw": value.raw, "metric": value.metric, "higher_is_better": value.higher_is_better}
+                    for name, value in match.channel_scores.items()
+                },
+            }
+        results.append(item)
+    return SearchArtifactsResponse.model_validate({"results": results})
+
+
 def capture_request(value: CaptureContentSourceRequest) -> CaptureSource:
     return CaptureSource(
         source_id=value.source_id,
         content=value.content,
         metadata={} if value.metadata is None else value.metadata,
     )
+
+
+def working_note_capture_request(value: CaptureWorkingNoteRequest) -> CaptureWorkingNote:
+    try:
+        return CaptureWorkingNote(
+            source_id=value.source_id,
+            content=value.content,
+            session_id=value.session_id,
+            note_kind=RuntimeWorkingNoteKind(value.note_kind.value),
+            expires_at=value.expires_at,
+        )
+    except (TypeError, ValueError, ValidationError) as error:
+        raise InvalidRuntimeRequestError("working-note") from error
 
 
 def create_work_contract_request(value: CreateWorkContractRequest) -> RuntimeCreateWorkContract:
@@ -572,79 +587,9 @@ def flush_response(value: MemoryFlushResult) -> FlushMemoryResponse:
         high_watermark=value.high_watermark,
         processed_source_count=value.source_count,
         memory=None if value.memory_ref is None else artifact_reference(value.memory_ref),
-    )
-
-
-def operation_response(value: StoredWork) -> OperationRecord:
-    """Project only bounded operation metadata and discriminated safe results."""
-
-    kind = _operation_kind(value.kind)
-    result = None
-    if value.result_payload is not None:
-        if kind is OperationKind.MEMORY_FLUSH:
-            memory = MemoryFlushResult.model_validate(value.result_payload)
-            result = MemoryOperationResult(
-                type="memory_flush",
-                previous_cursor=memory.previous_cursor,
-                high_watermark=memory.high_watermark,
-                current_cursor=memory.current_cursor,
-                processed_source_count=memory.source_count,
-                memory=None if memory.memory_ref is None else artifact_reference(memory.memory_ref),
-            )
-        else:
-            experience = ExperienceIncubationResult.model_validate(value.result_payload)
-            result = ExperienceOperationResult(
-                type="experience_incubation",
-                previous_cursor=experience.previous_cursor,
-                high_watermark=experience.high_watermark,
-                current_cursor=experience.current_cursor,
-                processed_source_count=experience.source_count,
-                candidate_count=experience.candidate_count,
-            )
-    error = (
-        None
-        if value.error_category is None or value.error_code is None
-        else OperationError(category=value.error_category, code=value.error_code)
-    )
-    return OperationRecord(
-        operation_id=UUID(value.work_id),
-        kind=kind,
-        scope_id=value.scope_id,
-        status=OperationStatus(value.status.value),
-        attempt_count=value.attempt_count,
-        state_version=value.state_version,
-        created_at=_aware_utc(value.created_at),
-        updated_at=_aware_utc(value.updated_at),
-        completed_at=None if value.completed_at is None else _aware_utc(value.completed_at),
-        result=result,
-        error=error,
-    )
-
-
-def _operation_kind(value: str) -> OperationKind:
-    if value == MEMORY_WORK_KIND:
-        return OperationKind.MEMORY_FLUSH
-    if value == EXPERIENCE_WORK_KIND:
-        return OperationKind.EXPERIENCE_INCUBATION
-    raise ValueError("unknown public operation kind")  # noqa: TRY003
-
-
-def operation_kind_value(value: OperationKind) -> str:
-    """Map the public operation discriminator to its internal handler kind."""
-
-    if value is OperationKind.MEMORY_FLUSH:
-        return MEMORY_WORK_KIND
-    return EXPERIENCE_WORK_KIND
-
-
-def _aware_utc(value: datetime) -> datetime:
-    return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
-
-
-def remember_request(value: TransportRememberMemoryRequest) -> RememberMemoryRequest:
-    return RememberMemoryRequest(
-        entries=(MemoryEntryInput(kind=value.kind, text=value.text, reason=value.reason),),
-        expected_revision=value.expected_revision,
+        remaining_work=value.remaining_work,
+        held_count=value.held_count,
+        hold_codes=list(value.hold_codes),
     )
 
 
@@ -653,7 +598,6 @@ def propose_experience_request(value: ProposeExperienceRequest) -> RuntimePropos
         proposal=experience_content(value.proposal),
         sources=tuple(runtime_source_reference(source) for source in value.source_refs),
         artifacts=tuple(runtime_artifact_reference(artifact) for artifact in value.artifact_refs),
-        memory_citations=tuple(runtime_citation(citation) for citation in value.memory_citations or ()),
         target=None if value.target is None else runtime_artifact_reference(value.target),
         reason=value.reason,
     )
@@ -696,8 +640,9 @@ def get_skill_request(value: GetSkillRequest) -> RuntimeGetSkillRequest:
     return RuntimeGetSkillRequest(artifact=runtime_artifact_reference(value.artifact))
 
 
-def list_candidates_request(value: ListArtifactCandidatesRequest) -> RuntimeListArtifactCandidatesRequest:
-    return RuntimeListArtifactCandidatesRequest(
+def list_candidates_request(value: ListCandidatesRequest) -> RuntimeListCandidatesRequest:
+    return RuntimeListCandidatesRequest(
+        candidate_kind=None if value.candidate_kind is None else value.candidate_kind.value,
         status=RuntimeCandidateStatus(value.status.value),
         family=None if value.family is None else value.family.value,
         cursor=value.cursor,
@@ -705,50 +650,66 @@ def list_candidates_request(value: ListArtifactCandidatesRequest) -> RuntimeList
     )
 
 
-def get_candidate_request(value: GetArtifactCandidateRequest) -> RuntimeGetArtifactCandidateRequest:
-    return RuntimeGetArtifactCandidateRequest(candidate_id=value.candidate_id)
+def get_candidate_request(value: GetCandidateRequest) -> RuntimeGetCandidateRequest:
+    return RuntimeGetCandidateRequest(candidate_id=value.candidate_id)
 
 
-def approve_candidate_request(value: ApproveArtifactCandidateRequest) -> RuntimeApproveArtifactCandidateRequest:
-    return RuntimeApproveArtifactCandidateRequest(
+def approve_candidate_request(value: ApproveCandidateRequest) -> RuntimeApproveCandidateRequest:
+    return RuntimeApproveCandidateRequest(
         candidate_id=value.candidate_id,
         expected_version=value.expected_version,
     )
 
 
-def reject_candidate_request(value: RejectArtifactCandidateRequest) -> RuntimeRejectArtifactCandidateRequest:
-    return RuntimeRejectArtifactCandidateRequest(
+def reject_candidate_request(value: RejectCandidateRequest) -> RuntimeRejectCandidateRequest:
+    return RuntimeRejectCandidateRequest(
         candidate_id=value.candidate_id,
         expected_version=value.expected_version,
         reason=value.reason,
     )
 
 
-def revise_candidate_request(value: ReviseArtifactCandidateRequest) -> RuntimeReviseArtifactCandidateRequest:
-    return RuntimeReviseArtifactCandidateRequest(
+def revise_candidate_request(value: ReviseCandidateRequest) -> RuntimeReviseCandidateRequest:
+    from powercontext.builtin.review.errors import InvalidCandidateError
+
+    tag = isinstance(value.proposal, CatalogChangeProposal)
+    if (value.sources is not None or value.artifacts is not None) and not tag:
+        raise InvalidCandidateError("evidence", "sources/artifacts are only accepted for Tag proposals")
+    if (value.sources is not None and "source_refs" in value.model_fields_set) or (
+        value.artifacts is not None and "artifact_refs" in value.model_fields_set
+    ):
+        raise InvalidCandidateError("evidence", "use one spelling for each evidence collection")
+    sources = (
+        None if value.source_refs is None else tuple(runtime_source_reference(source) for source in value.source_refs)
+    )
+    artifacts = (
+        None
+        if value.artifact_refs is None
+        else tuple(runtime_artifact_reference(artifact) for artifact in value.artifact_refs)
+    )
+    if tag:
+        sources = (
+            (None if "source_refs" not in value.model_fields_set else sources)
+            if value.sources is None
+            else tuple(
+                SourceRef(source_type=source.source_type, source_id=source.source_id) for source in value.sources
+            )
+        )
+        artifacts = (
+            (None if "artifact_refs" not in value.model_fields_set else artifacts)
+            if value.artifacts is None
+            else tuple(runtime_artifact_reference(ref) for ref in value.artifacts)
+        )
+    return RuntimeReviseCandidateRequest(
         candidate_id=value.candidate_id,
         expected_version=value.expected_version,
-        proposal=reviewed_content(value.proposal),
-        sources=tuple(runtime_source_reference(source) for source in value.source_refs),
-        artifacts=tuple(runtime_artifact_reference(artifact) for artifact in value.artifact_refs),
-        memory_citations=(
-            None
-            if value.memory_citations is None
-            else tuple(runtime_citation(citation) for citation in value.memory_citations or ())
-        ),
+        proposal=RuntimeTagProposal.model_validate_json(value.proposal.model_dump_json())
+        if tag
+        else reviewed_content(value.proposal),
+        sources=sources,
+        artifacts=artifacts,
         target=None if value.target is None else runtime_artifact_reference(value.target),
         reason=value.reason,
-    )
-
-
-def search_request(value: SearchMemoryRequest) -> RuntimeSearchMemoryRequest:
-    return RuntimeSearchMemoryRequest(
-        query=value.query,
-        limit=value.limit,
-        mode=value.mode.value,
-        tag_filter=None
-        if value.tag_filter is None
-        else TagFilter.model_validate_json(value.tag_filter.model_dump_json()),
     )
 
 
@@ -764,10 +725,23 @@ def prepare_context_request(value: TransportPrepareContextRequest) -> PrepareCon
     return PrepareContextRequest.model_validate_json(value.model_dump_json(exclude={"scope_id"}, exclude_unset=True))
 
 
+def bootstrap_context_request(value: TransportBootstrapContextRequest) -> RuntimeBootstrapContextRequest:
+    return RuntimeBootstrapContextRequest.model_validate_json(
+        value.model_dump_json(exclude={"scope_id"}, exclude_unset=True)
+    )
+
+
+def record_bootstrap_delivery_request(
+    value: TransportRecordBootstrapDeliveryRequest,
+) -> RuntimeRecordBootstrapDeliveryRequest:
+    return RuntimeRecordBootstrapDeliveryRequest.model_validate_json(value.model_dump_json(exclude={"scope_id"}))
+
+
 def activate_handoff_request(value: ActivateHandoffRequest) -> ActivateHandoff:
     return ActivateHandoff(
         boundary_source=runtime_source_reference(value.boundary_source),
         objective=value.objective,
+        rollover_reasons=tuple(reason.value for reason in value.rollover_reasons),
         evidence=tuple(runtime_handoff_citation(citation) for citation in value.evidence),
         max_bytes=value.max_bytes,
     )
@@ -786,6 +760,7 @@ def handoff_activation_response(value: HandoffActivation) -> TransportHandoffAct
 def prepare_handoff_request(value: PrepareHandoffRequest) -> PrepareHandoff:
     return PrepareHandoff(
         objective=value.objective,
+        rollover_reasons=tuple(reason.value for reason in value.rollover_reasons),
         evidence=tuple(runtime_handoff_citation(citation) for citation in value.evidence),
         max_bytes=value.max_bytes,
     )
@@ -860,29 +835,25 @@ def handoff_resolution_response(value: HandoffResolution) -> TransportHandoffRes
     })
 
 
-def get_request(value: GetMemoryEntryRequest) -> RuntimeGetMemoryEntryRequest:
-    return RuntimeGetMemoryEntryRequest(citation=runtime_citation(value.citation))
-
-
-def revise_request(value: ReviseMemoryEntryRequest) -> RuntimeReviseMemoryEntryRequest:
-    return RuntimeReviseMemoryEntryRequest(
-        citation=runtime_citation(value.citation),
-        kind=value.kind,
-        text=value.text,
-        reason=value.reason,
-    )
-
-
-def retire_request(value: RetireMemoryEntryRequest) -> RuntimeRetireMemoryEntryRequest:
-    return RuntimeRetireMemoryEntryRequest(citation=runtime_citation(value.citation), reason=value.reason)
-
-
-def search_response(value: MemorySearchPage) -> SearchMemoryResponse:
-    return SearchMemoryResponse(
-        memory=None if value.memory_ref is None else artifact_reference(value.memory_ref),
-        mode=None if value.mode is None else MemoryUsedSearchMode(value.mode),
-        hits=[search_hit(hit) for hit in value.hits],
-    )
+def search_response(value: AtomicMemorySearchPage) -> SearchMemoryResponse:
+    return SearchMemoryResponse.model_validate({
+        "mode": value.mode,
+        "hits": [
+            {
+                "memory": {
+                    "artifact": hit.hit.artifact_ref.model_dump(mode="json"),
+                    "state_version": hit.hit.state_version,
+                    "kind": hit.hit.kind,
+                    "text": hit.hit.text,
+                    "state": "active",
+                    "merged_into_id": None,
+                },
+                "score": hit.hit.score,
+                "matched_by": list(hit.matched_by),
+            }
+            for hit in value.hits
+        ],
+    })
 
 
 def topic_memory_flush_response(value: TopicMemoryFlushResult) -> FlushTopicMemoryResponse:
@@ -918,37 +889,64 @@ def topic_memory_response(value: PublishedTopicMemory) -> TopicMemoryArtifact:
 
 
 def prepared_context_response(value: PreparedContext) -> TransportPreparedContext:
-    return TransportPreparedContext.model_validate({
+    payload: dict[str, object] = {
         "schema": PreparedContextSchema(value.schema_version),
         "status": PreparedContextStatus(value.status),
         "content": value.content,
         "content_bytes": value.content_bytes,
-    })
+    }
+    if value.reason is not None:
+        # Named on purpose rather than dumped: the four fields above are what every Host validates,
+        # so this key appears only on a preparation that asked for it with ``explain``.
+        payload["reason"] = value.reason
+    return TransportPreparedContext.model_validate(payload)
 
 
-def entries_response(value: MemoryEntriesPage) -> ListMemoryEntriesResponse:
+def bootstrap_context_response(value: RuntimeBootstrapContext) -> TransportBootstrapContext:
+    return TransportBootstrapContext.model_validate_json(value.model_dump_json(by_alias=True))
+
+
+def bootstrap_delivery_response(value: RuntimeBootstrapDeliveryReceipt) -> BootstrapDeliveryReceipt:
+    return BootstrapDeliveryReceipt.model_validate_json(value.model_dump_json())
+
+
+def entries_response(value: AtomicMemoryPage) -> ListMemoryEntriesResponse:
     return ListMemoryEntriesResponse(
-        memory=None if value.memory_ref is None else artifact_reference(value.memory_ref),
-        entries=[memory_entry(item) for item in value.entries],
+        entries=[record_response(item) for item in value.items], next_cursor=value.next_cursor
     )
 
 
-def mutation_response(value: MemoryMutationResult) -> MemoryMutationResponse:
-    return MemoryMutationResponse(
-        memory=artifact_reference(value.memory_ref),
-        entry=None if value.entry is None else memory_entry(value.entry),
-    )
+def mutation_response(value: AtomicMemoryMutationResult) -> MemoryMutationResponse:
+    return MemoryMutationResponse(changed=value.changed, records=[record_response(item) for item in value.records])
 
 
-def changes_response(value: MemoryChangesPage) -> ListMemoryChangesResponse:
-    return ListMemoryChangesResponse(
-        memory=None if value.memory_ref is None else artifact_reference(value.memory_ref),
-        revisions=[revision_changes(revision) for revision in value.revisions],
-    )
-
-
-def candidate_response(value: RuntimeArtifactCandidate[Any]) -> ArtifactCandidate:
-    return ArtifactCandidate(
+def candidate_response(value: RuntimeCandidate[Any] | RuntimeTagCandidate) -> Candidate:
+    if isinstance(value, RuntimeTagCandidate):
+        return Candidate.model_validate({
+            "candidate_kind": "tag",
+            "candidate_id": value.candidate_id,
+            "version": value.version,
+            "family": CandidateFamily(value.proposal.target.family),
+            "status": CandidateStatus(value.status),
+            "proposal": CatalogChangeProposal.model_validate_json(value.proposal.model_dump_json()),
+            "source_refs": [source_reference(ref) for ref in value.sources],
+            "artifact_refs": [artifact_reference(ref) for ref in value.artifacts],
+            "target": None,
+            "reason": value.reason,
+            "result_artifact": None,
+            "decision_reason": value.decision_reason,
+            "audit": None
+            if value.audit is None
+            else CandidateAudit.model_validate(value.audit.model_dump(mode="json")),
+            "result": None
+            if value.result is None
+            else {**value.result.model_dump(mode="json"), "etag": value.result.etag},
+            "operation": value.operation,
+            "origin": value.origin,
+            "dream_run_id": value.dream_run_id,
+        })
+    return Candidate(
+        candidate_kind=CandidateKind.ARTIFACT,
         candidate_id=value.candidate_id,
         version=value.version,
         family=CandidateFamily(value.family),
@@ -956,11 +954,11 @@ def candidate_response(value: RuntimeArtifactCandidate[Any]) -> ArtifactCandidat
         proposal=reviewed_proposal(value.proposal),
         source_refs=[source_reference(source) for source in value.sources],
         artifact_refs=[artifact_reference(artifact) for artifact in value.artifacts],
-        memory_citations=[transport_citation(citation) for citation in value.memory_citations],
         target=None if value.target is None else artifact_reference(value.target),
         reason=value.reason,
         result_artifact=None if value.result_artifact is None else artifact_reference(value.result_artifact),
         decision_reason=value.decision_reason,
+        audit=None if value.audit is None else CandidateAudit.model_validate(value.audit.model_dump(mode="json")),
     )
 
 
@@ -971,8 +969,8 @@ def generated_candidate_response(value: RuntimeGeneratedCandidateResult) -> Gene
     )
 
 
-def candidate_page_response(value: RuntimeArtifactCandidatePage[Any]) -> ArtifactCandidatePage:
-    return ArtifactCandidatePage(
+def candidate_page_response(value: RuntimeCandidatePage[Any]) -> CandidatePage:
+    return CandidatePage(
         candidates=[candidate_response(candidate) for candidate in value.candidates],
         next_cursor=value.next_cursor,
     )
@@ -984,7 +982,6 @@ def experience_response(value: Experience) -> ExperienceArtifact:
         content=experience_proposal(value.content),
         source_refs=[source_reference(source) for source in value.lineage.sources],
         artifact_refs=[artifact_reference(artifact) for artifact in value.lineage.artifacts],
-        memory_citations=[transport_citation(citation) for citation in value.lineage.memory_citations],
     )
 
 
@@ -994,7 +991,6 @@ def skill_response(value: Skill) -> SkillArtifact:
         content=skill_proposal(value.content),
         source_refs=[source_reference(source) for source in value.lineage.sources],
         artifact_refs=[artifact_reference(artifact) for artifact in value.lineage.artifacts],
-        memory_citations=[],
     )
 
 
@@ -1140,8 +1136,30 @@ def skill_proposal(value: SkillContent) -> SkillProposal:
 
 
 def reviewed_content(
-    value: ExperienceProposal | SkillProposal | ProfileWriteContent,
-) -> ExperienceContent | SkillContent | RuntimeProfileWriteContent:
+    value: ExperienceProposal
+    | SkillProposal
+    | ProfileWriteContent
+    | AtomicMemoryContent
+    | TopicMemoryDreamProposal
+    | TransportHandoffContent
+    | PromptContent,
+) -> (
+    ExperienceContent
+    | SkillContent
+    | RuntimeProfileWriteContent
+    | RuntimeAtomicMemoryContent
+    | RuntimeTopicMemoryContent
+    | HandoffContent
+    | RuntimePromptContent
+):
+    if isinstance(value, PromptContent):
+        return RuntimePromptContent.model_validate_json(value.model_dump_json())
+    if isinstance(value, TransportHandoffContent):
+        return runtime_handoff_content(value)
+    if isinstance(value, TopicMemoryDreamProposal):
+        return RuntimeTopicMemoryContent.model_validate(value.model_dump(mode="json"))
+    if isinstance(value, AtomicMemoryContent):
+        return RuntimeAtomicMemoryContent.model_validate(value.model_dump(mode="json"))
     if isinstance(value, ProfileWriteContent):
         return RuntimeProfileWriteContent.model_validate(value.model_dump(mode="json"))
     if isinstance(value, ExperienceProposal):
@@ -1149,7 +1167,25 @@ def reviewed_content(
     return skill_content(value)
 
 
-def reviewed_proposal(value: object) -> ExperienceProposal | SkillProposal | ProfileCandidateProposal:
+def reviewed_proposal(
+    value: object,
+) -> (
+    ExperienceProposal
+    | SkillProposal
+    | ProfileCandidateProposal
+    | AtomicMemoryContent
+    | TopicMemoryDreamProposal
+    | TransportHandoffContent
+    | PromptContent
+):
+    if isinstance(value, RuntimePromptContent):
+        return PromptContent.model_validate_json(value.model_dump_json())
+    if isinstance(value, HandoffContent):
+        return handoff_content(value)
+    if isinstance(value, RuntimeTopicMemoryContent):
+        return TopicMemoryDreamProposal.model_validate(value.model_dump(mode="json"))
+    if isinstance(value, RuntimeAtomicMemoryContent):
+        return AtomicMemoryContent.model_validate(value.model_dump(mode="json", by_alias=True, exclude={"creation"}))
     if isinstance(value, RuntimeProfileCandidateProposal):
         return ProfileCandidateProposal.model_validate(value.model_dump(mode="json", by_alias=True))
     if isinstance(value, ExperienceContent):
@@ -1187,34 +1223,12 @@ def runtime_source_type_reference(value: SourceTypeReference) -> SourceRef:
     return SourceRef(source_type=value.source_type, source_id=value.source_id)
 
 
-def runtime_citation(value: TransportMemoryCitation) -> RuntimeMemoryCitation:
-    return RuntimeMemoryCitation(
-        memory_ref=ArtifactRef(
-            family=value.memory_ref.family,
-            artifact_id=value.memory_ref.artifact_id,
-            revision=value.memory_ref.revision,
-        ),
-        entry_id=value.entry_id,
-        entry_version_id=value.entry_version_id,
-    )
-
-
-def transport_citation(value: RuntimeMemoryCitation) -> TransportMemoryCitation:
-    return TransportMemoryCitation(
-        memory_ref=artifact_reference(value.memory_ref),
-        entry_id=value.entry_id,
-        entry_version_id=value.entry_version_id,
-    )
-
-
 def runtime_handoff_citation(value: TransportHandoffCitation) -> RuntimeHandoffCitation:
     citation = value.root
     if isinstance(citation, TransportHandoffSourceCitation):
         return HandoffSourceCitation(source_ref=runtime_source_reference(citation.source_ref))
     if isinstance(citation, TransportHandoffArtifactCitation):
         return HandoffArtifactCitation(artifact_ref=runtime_artifact_reference(citation.artifact_ref))
-    if isinstance(citation, TransportHandoffMemoryCitation):
-        return HandoffMemoryCitation(memory_citation=runtime_citation(citation.memory_citation))
     raise TypeError(f"unsupported Handoff citation: {type(citation).__name__}")  # noqa: TRY003
 
 
@@ -1228,11 +1242,6 @@ def handoff_citation(value: RuntimeHandoffCitation) -> TransportHandoffCitation:
         citation = TransportHandoffArtifactCitation(
             kind="artifact",
             artifact_ref=artifact_reference(value.artifact_ref),
-        )
-    elif isinstance(value, HandoffMemoryCitation):
-        citation = TransportHandoffMemoryCitation(
-            kind="memory",
-            memory_citation=transport_citation(value.memory_citation),
         )
     else:
         raise TypeError(f"unsupported Handoff citation: {type(value).__name__}")  # noqa: TRY003
@@ -1310,39 +1319,4 @@ def entry_change(value: MemoryChange) -> EntryChange:
         from_entry_version_id=value.from_entry_version_id,
         to_entry_version_id=value.to_entry_version_id,
         reason=value.reason,
-    )
-
-
-def revision_changes(value: RuntimeMemoryRevisionChanges) -> MemoryRevisionChanges:
-    return MemoryRevisionChanges(
-        memory_ref=artifact_reference(value.memory_ref),
-        changes=[entry_change(change) for change in value.changes],
-    )
-
-
-def search_hit(value: MemoryHit) -> SearchMemoryHit:
-    return SearchMemoryHit(
-        citation=transport_citation(
-            RuntimeMemoryCitation(
-                memory_ref=value.memory_ref,
-                entry_id=value.entry_id,
-                entry_version_id=value.entry_version_id,
-            )
-        ),
-        text=value.text,
-        score=value.score,
-        matched_by=[MemoryMatchedBy(channel) for channel in value.matched_by],
-    )
-
-
-def memory_entry(value: MemoryEntryRecord) -> MemoryEntry:
-    entry = value.entry
-    return MemoryEntry(
-        citation=transport_citation(value.citation),
-        version=entry.version,
-        kind=entry.kind,
-        text=entry.text,
-        state=MemoryEntryState(value.state),
-        source_refs=[SourceReference(name=source.source_type, source_id=source.source_id) for source in entry.sources],
-        artifact_refs=[artifact_reference(reference) for reference in entry.artifacts],
     )

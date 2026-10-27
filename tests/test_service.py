@@ -161,6 +161,7 @@ class FakeAdapter:
         self.fail_disable = False
         self.fail_remove = False
         self.fail_reload = False
+        self.suspended = False
 
     def support(self) -> tuple[SupportState, str]:
         return SupportState.SUPPORTED, "fake manager available"
@@ -221,6 +222,18 @@ class FakeAdapter:
         self.events.append("disable")
         if self.fail_disable:
             raise ServiceError("disable failed")  # noqa: TRY003
+
+    def suspend(self, marker: Path) -> None:
+        self.events.append("suspend")
+        self.suspended = True
+
+    def resume(self) -> None:
+        self.events.append("resume")
+        self.suspended = False
+
+    def update_suspended(self) -> None:
+        self.events.append("update_suspended")
+        self.loaded_definition = self.definition
 
     def remove(self) -> None:
         self.events.append("remove")
@@ -1918,6 +1931,35 @@ def test_service_launcher_can_redirect_server_output_to_owned_log_files(
     assert exit_code == 0
     assert stdout_path.read_text(encoding="utf-8") == "server output\n"
     assert stderr_path.read_text(encoding="utf-8") == "server error\n"
+
+
+@pytest.mark.parametrize("file_enabled", [True, False])
+def test_service_launcher_uses_bounded_file_logging_for_redirected_output(tmp_path, monkeypatch, file_enabled) -> None:
+    observed = []
+    environment = tmp_path / "service.env"
+    values = "POWERCONTEXT_SERVER_LOGGING_FORMAT=json\n" if file_enabled else "POWERCONTEXT_SERVER_LOGGING_FILE=false\n"
+    environment.write_text(values, encoding="utf-8")
+    environment.chmod(0o600)
+    _secure_windows_file(environment)
+    definition = _definition(
+        tmp_path, data_dir=str(tmp_path), env_file=load_protected_environment_file(environment).identity
+    )
+    monkeypatch.setattr(
+        service_launcher, "probe_server", lambda _endpoint: ProbeResult(ProbeState.UNREACHABLE, "not listening")
+    )
+    monkeypatch.setattr(
+        "powercontext.server.cli._run_configured_server", lambda settings: observed.append(settings.logging)
+    )
+    assert (
+        service_launcher.main([
+            *definition.launcher_arguments()[3:],
+            "--stdout",
+            str(tmp_path / "logs" / "server.stdout.log"),
+        ])
+        == 0
+    )
+    assert observed[0].file == file_enabled
+    assert observed[0].directory == tmp_path / "logs"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="launchd bootstrap retry state is POSIX-specific")

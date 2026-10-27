@@ -31,6 +31,7 @@ from powercontext.builtin.persistence.coordination import (
     StaleScanStateError,
 )
 from powercontext.builtin.persistence.database import AsyncDatabase
+from powercontext.builtin.persistence.decision_observations import DecisionObservationRepository
 from powercontext.builtin.persistence.errors import (
     ArtifactProcessingLeadershipLostError,
     ArtifactProcessingWaveIncompleteError,
@@ -103,6 +104,7 @@ __all__ = (
     "CoordinatorLease",
     "DatabaseClosedError",
     "EnqueueResult",
+    "DecisionObservationRepository",
     "ExternalSkillRepository",
     "GenerationConflictError",
     "IdentityMismatchError",

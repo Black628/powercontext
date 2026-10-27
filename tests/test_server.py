@@ -17,12 +17,9 @@ import logging
 import os
 import re
 import shlex
-import sqlite3
 from datetime import datetime, timedelta
 from pathlib import Path
-from types import SimpleNamespace
 from typing import cast
-from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -42,24 +39,20 @@ from powercontext.builtin.persistence.database import AsyncDatabase
 from powercontext.builtin.persistence.oceanbase import OceanBaseConfig
 from powercontext.builtin.persistence.seekdb import SeekDBConfig
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
-from powercontext.builtin.persistence.work import StoredWork
 from powercontext.builtin.runtime import (
-    ExperienceIncubationResult,
     InferenceConfig,
     MemoryExtractionProfile,
     RuntimeConfig,
 )
 from powercontext.builtin.runtime.readiness import READINESS_PROBE_TIMEOUT_SECONDS
-from powercontext.builtin.runtime.relational import RelationalContexts
-from powercontext.builtin.runtime.work_handlers import EXPERIENCE_WORK_KIND
 from powercontext.http import (
     Capabilities,
     ReadinessResponse,
     ReadinessStatus,
 )
 from powercontext.server.app import create_app
-from powercontext.server.authz import AccessControlService, PrincipalRef
-from powercontext.server.factory import _work_access, create_server_app
+from powercontext.server.authz import AccessControlService
+from powercontext.server.factory import create_server_app
 from powercontext.server.settings import (
     AccessControlConfig,
     BearerAuthConfig,
@@ -68,7 +61,7 @@ from powercontext.server.settings import (
 )
 from powercontext.sources import Source
 
-_ACCESS_FAMILIES = "experience:enabled,handoff:enabled,memory:enabled,profile:enabled,prompt:enabled,skill:enabled"
+_ACCESS_FAMILIES = "atomic-memory:enabled,experience:enabled,handoff:enabled,memory:enabled,profile:enabled,prompt:enabled,skill:enabled"
 
 
 class _StartupOnlyAccessControl:
@@ -254,14 +247,14 @@ def test_server_reuses_file_backed_cursor_secret_across_restarts(tmp_path, monke
     first_app = create_server_app(settings=settings)
     with TestClient(first_app) as client:
         scope_id = client.get("/v1/scopes/default").json()["scope_id"]
-        content = {"entries": [{"kind": "working_note", "text": "Verify cursor reuse after restart"}]}
+        content = {"kind": "fact", "text": "Verify cursor reuse after restart"}
         for _ in range(2):
             response = client.post(
                 f"/v1/scopes/{scope_id}/artifacts",
-                json={"family": "memory", "content": content},
+                json={"family": "atomic-memory", "content": content},
             )
             assert response.status_code == 201
-        first_page = client.get(f"/v1/scopes/{scope_id}/artifacts/memory", params={"limit": 1})
+        first_page = client.get(f"/v1/scopes/{scope_id}/artifacts/atomic-memory", params={"limit": 1})
         assert first_page.status_code == 200
         cursor = first_page.json()["next_cursor"]
         assert cursor is not None
@@ -269,12 +262,74 @@ def test_server_reuses_file_backed_cursor_secret_across_restarts(tmp_path, monke
     second_app = create_server_app(settings=settings)
     with TestClient(second_app) as client:
         second_page = client.get(
-            f"/v1/scopes/{scope_id}/artifacts/memory",
+            f"/v1/scopes/{scope_id}/artifacts/atomic-memory",
             params={"limit": 1, "cursor": cursor},
         )
 
     assert second_page.status_code == 200
     assert len(second_page.json()["items"]) == 1
+
+
+def test_server_info_uses_one_durable_identity_across_restarts(tmp_path) -> None:
+    settings = ServerSettings(
+        database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'runtime.db'}"),
+        auth=BearerAuthConfig(enabled=False),
+        mcp=McpConfig(enabled=False),
+    )
+
+    with TestClient(create_server_app(settings=settings)) as client:
+        first = client.get("/v1/server-info")
+    with TestClient(create_server_app(settings=settings)) as client:
+        second = client.get("/v1/server-info")
+
+    assert first.status_code == second.status_code == 200
+    assert first.json() == second.json()
+    assert first.json()["schema_version"] == {"major": 1, "minor": 0}
+    assert first.json()["api_contract_version"] == {"major": 1, "minor": 4}
+
+
+def test_server_startup_fails_when_identity_initialization_fails(tmp_path, monkeypatch) -> None:
+    async def unavailable_identity(_repository):
+        raise OSError("identity backend unavailable")  # noqa: TRY003
+
+    monkeypatch.setattr("powercontext.server.identity.ServerIdentityRepository.initialize", unavailable_identity)
+    app = create_server_app(
+        settings=ServerSettings(
+            database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'runtime.db'}"),
+            auth=BearerAuthConfig(enabled=False),
+            mcp=McpConfig(enabled=False),
+        )
+    )
+
+    with pytest.raises(OSError, match="identity backend unavailable"), TestClient(app):
+        pass
+
+
+def test_servers_sharing_memory_scopes_share_identity_for_the_database_lifetime(tmp_path) -> None:
+    settings = ServerSettings(
+        database=SQLiteConfig(url=f"sqlite+aiosqlite:///file:{tmp_path / 'shared'}?mode=memory&cache=shared&uri=true"),
+        auth=BearerAuthConfig(enabled=False),
+        mcp=McpConfig(enabled=False),
+    )
+
+    with TestClient(create_server_app(settings=settings)) as first:
+        original_id = first.get("/v1/server-info").json()["server_id"]
+        created = first.post(
+            "/v1/scopes",
+            json={"title": "Shared Scope", "summary": "Shared deployment data", "idempotency_key": "shared-scope"},
+        )
+        assert created.status_code == 201
+        scope_id = created.json()["scope_id"]
+        with TestClient(create_server_app(settings=settings)) as second:
+            assert second.get(f"/v1/scopes/{scope_id}").json() == created.json()
+            assert second.get("/v1/server-info").json()["server_id"] == original_id
+
+        assert first.get("/v1/server-info").json()["server_id"] == original_id
+        assert first.get(f"/v1/scopes/{scope_id}").status_code == 200
+
+    with TestClient(create_server_app(settings=settings)) as reopened:
+        assert reopened.get(f"/v1/scopes/{scope_id}").status_code == 404
+        assert reopened.get("/v1/server-info").json()["server_id"] != original_id
 
 
 def test_server_settings_use_configured_workspace_for_default_skill_targets(tmp_path, monkeypatch) -> None:
@@ -431,7 +486,7 @@ def test_server_settings_reject_custom_embedded_seekdb_database(tmp_path, monkey
         ServerSettings()
 
 
-def test_background_processing_uses_primary_database_without_scheduler_sidecar(tmp_path, monkeypatch) -> None:
+def test_supervisor_uses_primary_database_without_scheduler_sidecar(tmp_path, monkeypatch) -> None:
     data_dir = tmp_path / "powercontext-data"
     monkeypatch.setenv("POWERCONTEXT_HOME", str(data_dir))
     app = create_server_app(
@@ -443,69 +498,8 @@ def test_background_processing_uses_primary_database_without_scheduler_sidecar(t
     )
 
     with TestClient(app):
-        database = data_dir / "powercontext.db"
-        assert database.is_file()
-        with sqlite3.connect(database) as connection:
-            tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
-        assert "pc_scheduler_leases" in tables
-        assert "pc_work_items" in tables
+        assert (data_dir / "powercontext.db").is_file()
         assert not (data_dir / "scheduler.db").exists()
-
-
-def test_scheduled_experience_owns_only_candidates_created_by_its_incubation() -> None:
-    async def scenario() -> None:
-        result = ExperienceIncubationResult(
-            previous_cursor=0,
-            high_watermark=2,
-            current_cursor=2,
-            source_count=1,
-            candidate_count=1,
-            candidate_ids=("scheduled-candidate",),
-        )
-        access = AsyncMock(spec=AccessControlService)
-        settings = ServerSettings(
-            runtime=RuntimeConfig(experience_schedule_seconds=1),
-            access=AccessControlConfig(
-                mode="enforced",
-                background_principal_id="scheduled-experience",
-            ),
-            mcp=McpConfig(enabled=False),
-        )
-        hooks = _work_access(
-            settings,
-            access,
-            legacy_static_principal=None,
-        )
-
-        assert hooks is not None
-        await hooks.succeeded(
-            cast(RelationalContexts, SimpleNamespace()),
-            cast(
-                StoredWork,
-                SimpleNamespace(
-                    kind=EXPERIENCE_WORK_KIND,
-                    scope_id="scope-1",
-                    payload={
-                        "cursor_name": "experience-incubation",
-                        "cursor_generation": 0,
-                        "after": 0,
-                        "through": 2,
-                        "high_watermark": 2,
-                    },
-                    result_payload=result.model_dump(mode="json"),
-                ),
-            ),
-        )
-        access.attest_candidate_owner.assert_awaited_once_with(
-            scope_id="scope-1",
-            candidate_id="scheduled-candidate",
-            family="experience",
-            proposed_owner=PrincipalRef(type="service", id="scheduled-experience"),
-            target=None,
-            idempotency_key="background-candidate-owner:scope-1:scheduled-candidate",
-        )
-
-    asyncio.run(scenario())
 
 
 def test_settings_load_bearer_authentication_without_exposing_token(monkeypatch) -> None:
@@ -602,6 +596,8 @@ def test_server_factory_optionally_requires_bearer_authentication() -> None:
         missing = client.get("/v1/capabilities")
         invalid = client.get("/v1/capabilities", headers={"Authorization": "Bearer wrong"})
         accepted = client.get("/v1/capabilities", headers={"Authorization": "Bearer server-secret"})
+        protected_server_info = client.get("/v1/server-info")
+        accepted_server_info = client.get("/v1/server-info", headers={"Authorization": "Bearer server-secret"})
         protected_metrics = client.get("/metrics")
         accepted_metrics = client.get("/metrics", headers={"Authorization": "Bearer server-secret"})
         liveness = client.get("/health/live")
@@ -619,6 +615,8 @@ def test_server_factory_optionally_requires_bearer_authentication() -> None:
     }
     assert invalid.status_code == 401
     assert accepted.status_code == 200
+    assert protected_server_info.status_code == 401
+    assert accepted_server_info.status_code == 200
     assert protected_metrics.status_code == 401
     assert accepted_metrics.status_code == 200
     assert liveness.status_code == 200
@@ -1079,6 +1077,34 @@ def test_unhandled_errors_return_the_server_request_id() -> None:
 
     assert response.status_code == 500
     assert re.fullmatch(r"[0-9a-f]{16}", response.headers["X-PowerContext-Request-ID"])
+
+
+def test_prepare_context_keeps_the_four_field_envelope_unless_the_request_explains(tmp_path) -> None:
+    """Every Host validator compares the key set exactly, so an injected response cannot grow a fifth field.
+
+    ``explain`` is the opt-in that publishes ``reason``, and it publishes nothing on a deployment that
+    lost no channel: this Server has no embedding model, so both responses carry the same four fields.
+    """
+
+    app = create_server_app(
+        settings=ServerSettings(
+            database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'runtime.db'}"),
+            mcp=McpConfig(enabled=False),
+        )
+    )
+
+    with TestClient(app) as client:
+        scope_id = client.get("/v1/scopes/default").json()["scope_id"]
+        plain = client.post("/v1/context/prepare", json={"scope_id": scope_id, "query": "alpha beta"})
+        explained = client.post(
+            "/v1/context/prepare",
+            json={"scope_id": scope_id, "query": "alpha beta", "explain": True},
+        )
+
+    assert plain.status_code == 200
+    assert explained.status_code == 200
+    assert set(plain.json()) == {"schema", "status", "content", "content_bytes"}
+    assert set(explained.json()) == {"schema", "status", "content", "content_bytes"}
 
 
 def test_prepare_context_rejects_memory_specific_tuning_fields(tmp_path) -> None:

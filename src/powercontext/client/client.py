@@ -18,22 +18,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
-from time import monotonic
 from types import TracebackType
 from typing import Any, Self, TypeVar, cast
-from urllib.parse import quote
-from uuid import UUID
+from urllib.parse import quote, urlsplit
 
 import httpx
 from pydantic import TypeAdapter, ValidationError
 
-from powercontext.client.errors import (
-    InvalidResponseError,
-    OperationFailedError,
-    OperationPendingError,
-    TransportError,
-    server_response_error,
-)
+from powercontext.client.errors import InvalidResponseError, TransportError, server_response_error
 from powercontext.client.tags import ArtifactTagSetResponse
 from powercontext.client.tracing import ClientSpan
 from powercontext.client.transport_policy import resolve_client_transport
@@ -49,17 +41,24 @@ from powercontext.http import (
     AccessRolePage,
     AcknowledgeHandoffRequest,
     ActivateHandoffRequest,
-    ApproveArtifactCandidateRequest,
-    ArtifactCandidate,
-    ArtifactCandidatePage,
+    ApproveCandidateRequest,
     ArtifactCreated,
+    ArtifactHandleBinding,
     ArtifactPage,
     ArtifactPublication,
     ArtifactRevision,
     ArtifactRevisionPage,
+    BindArtifactHandleRequest,
+    BootstrapContext,
+    BootstrapContextRequest,
+    BootstrapDeliveryReceipt,
+    Candidate,
+    CandidateHistory,
+    CandidatePage,
     Capabilities,
     CaptureContentSourceRequest,
     CaptureContentSourceResponse,
+    CaptureWorkingNoteRequest,
     ClearScopeBindingRequest,
     ClearScopeBindingResponse,
     CodeQueryRequest,
@@ -90,14 +89,13 @@ from powercontext.http import (
     FlushMemoryResponse,
     FlushProfileRequest,
     FlushProfileResponse,
-    FlushStatus,
     FlushTopicMemoryRequest,
     FlushTopicMemoryResponse,
     GeneratedCandidateResponse,
     GenerateExperienceRequest,
     GeneratePromptDemonstrationsRequest,
     GenerateSkillRequest,
-    GetArtifactCandidateRequest,
+    GetCandidateRequest,
     GetConnectorCheckpointRequest,
     GetExperienceRequest,
     GetHandoffReportRequest,
@@ -119,9 +117,9 @@ from powercontext.http import (
     ListAccessBindingsRequest,
     ListAccessResourcesRequest,
     ListAccessRolesRequest,
-    ListArtifactCandidatesRequest,
     ListArtifactRevisionsRequest,
     ListArtifactsRequest,
+    ListCandidatesRequest,
     ListDreamRunsRequest,
     ListExternalSkillsRequest,
     ListExternalSkillsResponse,
@@ -131,24 +129,17 @@ from powercontext.http import (
     ListMemoryChangesResponse,
     ListMemoryEntriesRequest,
     ListMemoryEntriesResponse,
-    ListOperationsRequest,
     ListRemoteSkillTargetsRequest,
     ListRemoteSkillTargetsResponse,
     ListScopesRequest,
     ListSourcesRequest,
     MemoryCapacity,
-    MemoryEntry,
     MemoryMutationResponse,
-    MemoryOperationResult,
-    OperationAccepted,
-    OperationMutationRequest,
-    OperationPage,
-    OperationRecord,
-    OperationStatus,
     PrepareContextRequest,
     PreparedContext,
     PreparedHandoff,
     PreparedWorkHandoff,
+    PrepareHandoffHintRequest,
     PrepareHandoffRequest,
     ProfilePolicyResponse,
     PromptConfiguration,
@@ -162,11 +153,12 @@ from powercontext.http import (
     ReadinessResponse,
     ReconcileRemoteSkillsRequest,
     ReconcileRemoteSkillsResponse,
+    RecordBootstrapDeliveryRequest,
     RecordRemoteSkillReceiptRequest,
     RecordSkillUsageRequest,
     RecordTaskOutcomeRequest,
     RegisterSourceDefinitionRequest,
-    RejectArtifactCandidateRequest,
+    RejectCandidateRequest,
     RememberMemoryRequest,
     RemoteSkillPublication,
     RemoteSkillReceiptResponse,
@@ -180,7 +172,7 @@ from powercontext.http import (
     ResolveScopeBindingRequest,
     ResolveScopeSelectionRequest,
     RetireMemoryEntryRequest,
-    ReviseArtifactCandidateRequest,
+    ReviseCandidateRequest,
     ReviseMemoryEntryRequest,
     RevokeAccessBindingRequest,
     RevokeRemoteSkillTargetRequest,
@@ -191,10 +183,13 @@ from powercontext.http import (
     ScopedStats,
     ScopePage,
     ScopeQueryField,
+    SearchArtifactsRequest,
+    SearchArtifactsResponse,
     SearchMemoryRequest,
     SearchMemoryResponse,
     SearchTopicMemoryRequest,
     SearchTopicMemoryResponse,
+    ServerInfo,
     SetDefaultScopeRequest,
     SetScopeBindingRequest,
     SkillArtifact,
@@ -212,18 +207,27 @@ from powercontext.http import (
     UpdateSkillLifecycleRequest,
     WorkSourceReceipt,
 )
+from powercontext.http._generated import models as atomic_models
+from powercontext.http._generated import operations as atomic_operations
 from powercontext.http._generated.models import (
     ArtifactTagPage,
     ArtifactTagSet,
+    GetTopicMemoryProcessingBlockRequest,
     QueryArtifactTagsRequest,
     ReplaceArtifactTagsRequest,
+    RetryTopicMemoryProcessingRequest,
+    RetryTopicMemoryProcessingResponse,
+    TopicMemoryProcessingBlock,
+    TopicMemoryProcessingStatus,
+    TopicMemoryProcessingStatusRequest,
 )
 from powercontext.http._generated.operations import (
     ACKNOWLEDGE_HANDOFF,
     ACTIVATE_HANDOFF,
-    APPROVE_ARTIFACT_CANDIDATE,
-    CANCEL_OPERATION,
+    APPROVE_CANDIDATE,
+    BIND_ARTIFACT_HANDLE,
     CAPTURE_CONTENT_SOURCE,
+    CAPTURE_WORKING_NOTE,
     CHECK_ACCESS,
     CLEAR_SCOPE_BINDING,
     COMMIT_CONNECTOR_CHECKPOINT,
@@ -249,9 +253,10 @@ from powercontext.http._generated.operations import (
     GENERATE_SKILL,
     GET_ACCESS_PRINCIPAL,
     GET_ARTIFACT,
-    GET_ARTIFACT_CANDIDATE,
     GET_ARTIFACT_REVISION,
     GET_ARTIFACT_TAGS,
+    GET_CANDIDATE,
+    GET_CANDIDATE_HISTORY,
     GET_CAPABILITIES,
     GET_CONNECTOR_CHECKPOINT,
     GET_DEFAULT_SCOPE,
@@ -262,36 +267,39 @@ from powercontext.http._generated.operations import (
     GET_MEMORY_CAPACITY,
     GET_MEMORY_ENTRY,
     GET_MEMORY_ENTRY_TAGS,
-    GET_OPERATION,
     GET_PROFILE_POLICY,
     GET_PROMPT_CONFIGURATION,
     GET_READINESS,
     GET_SCOPE,
+    GET_SERVER_INFO,
     GET_SKILL,
     GET_SKILL_PACKAGE_MANIFEST,
     GET_SOURCE,
     GET_STATS,
     GET_TOPIC_MEMORY,
+    GET_TOPIC_MEMORY_PROCESSING_BLOCK,
+    GET_TOPIC_MEMORY_PROCESSING_STATUS,
     HANDOFF_CURRENT_WORK,
     IMPORT_EXTERNAL_SKILL,
     LIST_ACCESS_AUDIT,
     LIST_ACCESS_BINDINGS,
     LIST_ACCESS_RESOURCES,
     LIST_ACCESS_ROLES,
-    LIST_ARTIFACT_CANDIDATES,
     LIST_ARTIFACT_REVISIONS,
     LIST_ARTIFACTS,
+    LIST_CANDIDATES,
     LIST_DREAM_RUNS,
     LIST_EXTERNAL_SKILLS,
     LIST_MANAGED_SKILLS,
     LIST_MEMORY_CHANGES,
     LIST_MEMORY_ENTRIES,
-    LIST_OPERATIONS,
     LIST_REMOTE_SKILL_TARGETS,
     LIST_SCOPES,
     LIST_SOURCES,
+    PREPARE_BOOTSTRAP_CONTEXT,
     PREPARE_CONTEXT,
     PREPARE_HANDOFF,
+    PREPARE_HANDOFF_HINT,
     PROPOSE_EXPERIENCE,
     PROPOSE_SKILL,
     PROPOSE_SKILL_PACKAGE,
@@ -301,27 +309,30 @@ from powercontext.http._generated.operations import (
     QUERY_ARTIFACT_TAGS,
     QUERY_CODE,
     RECONCILE_REMOTE_SKILLS,
+    RECORD_BOOTSTRAP_DELIVERY,
     RECORD_REMOTE_SKILL_RECEIPT,
     RECORD_SKILL_USAGE,
     RECORD_TASK_OUTCOME,
     REGISTER_SOURCE_DEFINITION,
-    REJECT_ARTIFACT_CANDIDATE,
+    REJECT_CANDIDATE,
     REMEMBER_MEMORY,
     RENAME_REMOTE_SKILL_TARGET,
     REPLACE_ACCESS_BINDING,
     REPLACE_ARTIFACT,
     REPLACE_ARTIFACT_TAGS,
     REPLACE_MEMORY_ENTRY_TAGS,
+    RESOLVE_ARTIFACT_HANDLE,
     RESOLVE_EXTERNAL_SKILL,
     RESOLVE_SCOPE_BINDING,
     RESOLVE_SCOPE_SELECTION,
     RETIRE_MEMORY_ENTRY,
-    RETRY_OPERATION,
-    REVISE_ARTIFACT_CANDIDATE,
+    RETRY_TOPIC_MEMORY_PROCESSING,
+    REVISE_CANDIDATE,
     REVISE_MEMORY_ENTRY,
     REVOKE_ACCESS_BINDING,
     REVOKE_REMOTE_SKILL_TARGET,
     SCAN_EXTERNAL_SKILLS,
+    SEARCH_ARTIFACTS,
     SEARCH_MEMORY,
     SEARCH_TOPIC_MEMORY,
     SET_DEFAULT_SCOPE,
@@ -332,7 +343,7 @@ from powercontext.http._generated.operations import (
     UPDATE_SKILL_LIFECYCLE,
     Operation,
 )
-from powercontext.transport import is_plaintext_non_loopback
+from powercontext.transport import is_loopback_host, is_plaintext_non_loopback
 
 REQUEST_ID_HEADER = "X-PowerContext-Request-ID"
 _RequestT = TypeVar("_RequestT")
@@ -350,8 +361,6 @@ class PowerContextClient:
         timeout: float = 10.0,
         http_client: httpx.AsyncClient | None = None,
         trust_transport_security: bool = False,
-        operation_timeout: float = 30.0,
-        operation_poll_seconds: float = 0.2,
         allow_insecure_http: bool | None = None,
     ) -> None:
         self._base_url, allow_insecure_http = resolve_client_transport(
@@ -372,16 +381,16 @@ class PowerContextClient:
         transport_trusted = http_client is not None and trust_transport_security
         if not transport_trusted and not allow_insecure_http and is_plaintext_non_loopback(self._base_url):
             raise ValueError("refusing to send requests over unencrypted non-loopback HTTP")  # noqa: TRY003
-        self._headers = {"Authorization": f"Bearer {token}"} if token else None
-        if operation_timeout <= 0:
-            raise ValueError("operation_timeout must be positive")  # noqa: TRY003
-        if operation_poll_seconds <= 0:
-            raise ValueError("operation_poll_seconds must be positive")  # noqa: TRY003
-        self._operation_timeout = operation_timeout
-        self._operation_poll_seconds = operation_poll_seconds
+        self._headers = {"X-PowerContext-Dream-Contract": "2"}
+        if token:
+            self._headers["Authorization"] = f"Bearer {token}"
         self._owned_http_client: httpx.AsyncClient | None = None
         if http_client is None:
-            self._owned_http_client = httpx.AsyncClient(timeout=timeout)
+            # Loopback traffic must not leave the machine through environment or OS-level proxy
+            # discovery. An explicit transport bypasses proxies while still honoring HTTPX's
+            # SSL_CERT_FILE/SSL_CERT_DIR handling; remote targets keep normal proxy behavior.
+            transport = httpx.AsyncHTTPTransport() if is_loopback_host(urlsplit(self._base_url).hostname) else None
+            self._owned_http_client = httpx.AsyncClient(timeout=timeout, transport=transport)
             self._http_client = self._owned_http_client
         else:
             self._http_client = http_client
@@ -417,6 +426,11 @@ class PowerContextClient:
         """Read behavior enabled by the assembled runtime."""
 
         return await self._request(GET_CAPABILITIES)
+
+    async def get_server_info(self) -> ServerInfo:
+        """Read stable deployment identity and protocol compatibility metadata."""
+
+        return await self._request(GET_SERVER_INFO)
 
     async def list_scopes(
         self,
@@ -553,10 +567,10 @@ class PowerContextClient:
             span.finish("failure", error=error)
             raise
         span.finish(
-            "success" if response.status_code in GET_HANDOFF_REPORT.success_statuses else "failure",
+            "success" if response.status_code == GET_HANDOFF_REPORT.success_status else "failure",
             status_code=response.status_code,
         )
-        if response.status_code not in GET_HANDOFF_REPORT.success_statuses:
+        if response.status_code != GET_HANDOFF_REPORT.success_status:
             error = _decode_error(response.content)
             raise server_response_error(
                 status_code=response.status_code,
@@ -571,6 +585,11 @@ class PowerContextClient:
         """Capture raw content as durable Source evidence."""
 
         return await self._request(CAPTURE_CONTENT_SOURCE, request)
+
+    async def capture_working_note(self, request: CaptureWorkingNoteRequest) -> CaptureContentSourceResponse:
+        """Capture explicit session-local work state as Source evidence."""
+
+        return await self._request(CAPTURE_WORKING_NOTE, request)
 
     async def get_access_principal(self) -> AccessMeResponse:
         """Return the authenticated Principal and enforceable Access capabilities."""
@@ -772,6 +791,8 @@ class PowerContextClient:
 
     async def query_artifact_tags(self, scope_id: str, request: QueryArtifactTagsRequest) -> ArtifactTagPage:
         """Find visible targets by exact tags within a Scope."""
+        if "memory" in (request.families or ()) or "memory_entry" in (request.target_types or ()):
+            raise ValueError("legacy Memory tag queries are unsupported; use atomic-memory Artifact tags")  # noqa: TRY003
         return await self._request(QUERY_ARTIFACT_TAGS, request, path_parameters={"scope_id": scope_id})
 
     async def _tag_request(
@@ -814,6 +835,29 @@ class PowerContextClient:
                 "artifact_id": artifact_id,
                 "revision": revision,
             },
+        )
+
+    async def bind_artifact_handle(
+        self,
+        scope_id: str,
+        family: str,
+        key: str,
+        request: BindArtifactHandleRequest,
+    ) -> ArtifactHandleBinding:
+        """Idempotently bind a scope-local handle to an exact Artifact revision."""
+
+        return await self._request(
+            BIND_ARTIFACT_HANDLE,
+            request,
+            path_parameters={"scope_id": scope_id, "family": family, "key": key},
+        )
+
+    async def resolve_artifact_handle(self, scope_id: str, family: str, key: str) -> ArtifactHandleBinding:
+        """Resolve a scope-local handle to its exact Artifact revision."""
+
+        return await self._request(
+            RESOLVE_ARTIFACT_HANDLE,
+            path_parameters={"scope_id": scope_id, "family": family, "key": key},
         )
 
     async def list_artifacts(self, scope_id: str, family: str, request: ListArtifactsRequest) -> ArtifactPage:
@@ -919,83 +963,72 @@ class PowerContextClient:
     async def flush_memory(self, request: FlushMemoryRequest) -> FlushMemoryResponse:
         """Run one bounded Source-to-Memory activation."""
 
-        deadline = monotonic() + self._operation_timeout
-        submitted = await self.submit_memory_flush(request)
-        if isinstance(submitted, FlushMemoryResponse):
-            return submitted
-        operation_id = submitted.operation_id
-        while True:
-            remaining = deadline - monotonic()
-            if remaining <= 0:
-                raise OperationPendingError(str(operation_id))
-            await asyncio.sleep(min(self._operation_poll_seconds, remaining))
-            operation = await self.get_operation(operation_id)
-            if operation.status is OperationStatus.SUCCEEDED:
-                return _flush_response_from_operation(operation)
-            if operation.status in {OperationStatus.FAILED, OperationStatus.CANCELLED}:
-                raise OperationFailedError(
-                    str(operation_id),
-                    code=None if operation.error is None else operation.error.code,
-                )
-
-    async def submit_memory_flush(
-        self,
-        request: FlushMemoryRequest,
-    ) -> FlushMemoryResponse | OperationAccepted:
-        """Submit one Memory window and return immediately when it remains pending."""
-
-        return await self._request(
-            FLUSH_MEMORY,
-            request,
-            extra_headers={"Prefer": "respond-async"},
-        )
-
-    async def get_operation(self, operation_id: str | UUID) -> OperationRecord:
-        """Read one durable operation."""
-
-        return await self._request(
-            GET_OPERATION,
-            path_parameters={"operation_id": str(UUID(str(operation_id)))},
-        )
-
-    async def list_operations(self, request: ListOperationsRequest) -> OperationPage:
-        """List a bounded page of durable operations."""
-
-        return await self._request(LIST_OPERATIONS, request)
-
-    async def cancel_operation(
-        self,
-        operation_id: str | UUID,
-        request: OperationMutationRequest,
-    ) -> OperationRecord:
-        """Cancel a queued or active operation using its state version."""
-
-        return await self._request(
-            CANCEL_OPERATION,
-            request,
-            path_parameters={"operation_id": str(UUID(str(operation_id)))},
-        )
-
-    async def retry_operation(
-        self,
-        operation_id: str | UUID,
-        request: OperationMutationRequest,
-    ) -> OperationRecord:
-        """Recover one blocked failed operation using its state version."""
-
-        return await self._request(
-            RETRY_OPERATION,
-            request,
-            path_parameters={"operation_id": str(UUID(str(operation_id)))},
-        )
+        return await self._request(FLUSH_MEMORY, request)
 
     async def flush_topic_memory(self, request: FlushTopicMemoryRequest) -> FlushTopicMemoryResponse:
         """Durably request Topic Memory processing without waiting for completion."""
 
         return await self._request(FLUSH_TOPIC_MEMORY, request)
 
+    async def get_topic_memory_processing_status(
+        self, request: TopicMemoryProcessingStatusRequest
+    ) -> TopicMemoryProcessingStatus:
+        """Inspect a frontier without granting another attempt."""
+        return await self._request(GET_TOPIC_MEMORY_PROCESSING_STATUS, request)
+
+    async def get_topic_memory_processing_block(
+        self, request: GetTopicMemoryProcessingBlockRequest
+    ) -> TopicMemoryProcessingBlock:
+        """Read the exact retained diagnostics, including a prior accepted retry."""
+        return await self._request(GET_TOPIC_MEMORY_PROCESSING_BLOCK, request)
+
+    async def retry_topic_memory_processing(
+        self, request: RetryTopicMemoryProcessingRequest
+    ) -> RetryTopicMemoryProcessingResponse:
+        """Idempotently request one fresh bounded allowance for an observed block."""
+        return await self._request(RETRY_TOPIC_MEMORY_PROCESSING, request)
+
+    async def get_atomic_memory_state(self, scope_id: str, artifact_id: str) -> atomic_models.AtomicMemoryStateResponse:
+        """Read current state independently of an immutable content revision."""
+        return await self._request(
+            atomic_operations.GET_ATOMIC_MEMORY_STATE,
+            path_parameters={"scope_id": scope_id, "artifact_id": artifact_id},
+        )
+
+    async def list_atomic_memories(
+        self, request: atomic_models.ListAtomicMemoryRequest
+    ) -> atomic_models.ListAtomicMemoryResponse:
+        return await self._request(atomic_operations.LIST_ATOMIC_MEMORIES, request)
+
+    async def search_atomic_memory(
+        self, request: atomic_models.SearchAtomicMemoryRequest
+    ) -> atomic_models.SearchAtomicMemoryResponse:
+        return await self._request(atomic_operations.SEARCH_ATOMIC_MEMORY, request)
+
+    async def merge_atomic_memories(
+        self, request: atomic_models.MergeAtomicMemoryRequest
+    ) -> atomic_models.AtomicMemoryMutationResponse:
+        """Merge exact inputs; a transport failure requires inspecting current state."""
+        return await self._request(atomic_operations.MERGE_ATOMIC_MEMORIES, request)
+
+    async def change_atomic_memory_lifecycle(
+        self, request: atomic_models.AtomicMemoryLifecycleRequest
+    ) -> atomic_models.AtomicMemoryMutationResponse:
+        return await self._request(atomic_operations.CHANGE_ATOMIC_MEMORY_LIFECYCLE, request)
+
+    async def preview_atomic_memory_restoration(
+        self, request: atomic_models.AtomicMemoryRestorationPreviewRequest
+    ) -> atomic_models.AtomicMemoryRestorationPreview:
+        return await self._request(atomic_operations.PREVIEW_ATOMIC_MEMORY_RESTORATION, request)
+
+    async def restore_atomic_memory(
+        self, request: atomic_models.AtomicMemoryRestorationRequest
+    ) -> atomic_models.AtomicMemoryRestorationResponse:
+        """Restore the current graph once, without blindly replaying an unknown commit."""
+        return await self._request(atomic_operations.RESTORE_ATOMIC_MEMORY, request)
+
     async def remember_memory(self, request: RememberMemoryRequest) -> MemoryMutationResponse:
-        """Save one explicit Memory entry without creating a Source."""
+        """Create one Atomic Memory; non-null legacy collection revision preconditions are unsupported."""
 
         return await self._request(REMEMBER_MEMORY, request)
 
@@ -1008,6 +1041,13 @@ class PowerContextClient:
         """Search current Topic Memory heads with Server-owned retrieval mode."""
 
         return await self._request(SEARCH_TOPIC_MEMORY, request)
+
+    async def search_artifacts(
+        self, scope_id: str, family: str, request: SearchArtifactsRequest
+    ) -> SearchArtifactsResponse:
+        """Search a registered Artifact Family and retain complete exact revisions."""
+
+        return await self._request(SEARCH_ARTIFACTS, request, path_parameters={"scope_id": scope_id, "family": family})
 
     async def get_topic_memory(self, request: GetTopicMemoryRequest) -> TopicMemoryArtifact:
         """Read one exact immutable Topic Memory revision."""
@@ -1022,6 +1062,19 @@ class PowerContextClient:
         """Prepare final bounded context for one Agent turn."""
 
         return await self._request(PREPARE_CONTEXT, request)
+
+    async def prepare_bootstrap_context(self, request: BootstrapContextRequest) -> BootstrapContext:
+        """Prepare curated bounded context for one Agent lifecycle boundary."""
+
+        return await self._request(PREPARE_BOOTSTRAP_CONTEXT, request)
+
+    async def record_bootstrap_delivery(
+        self,
+        request: RecordBootstrapDeliveryRequest,
+    ) -> BootstrapDeliveryReceipt:
+        """Finalize one content-free bootstrap delivery receipt."""
+
+        return await self._request(RECORD_BOOTSTRAP_DELIVERY, request)
 
     async def prepare_handoff(self, request: PrepareHandoffRequest) -> HandoffDraft:
         """Generate one inspectable Handoff Draft from exact evidence."""
@@ -1048,23 +1101,28 @@ class PowerContextClient:
 
         return await self._request(CONTINUE_HANDOFF, request)
 
+    async def prepare_handoff_hint(self, request: PrepareHandoffHintRequest) -> PreparedContext:
+        """Prepare optional orientation; read the full Handoff before continuing work."""
+
+        return await self._request(PREPARE_HANDOFF_HINT, request)
+
     async def get_memory_capacity(self, request: GetMemoryCapacityRequest) -> MemoryCapacity:
-        """Read capacity of the current Memory head."""
+        """Legacy collection capacity is unsupported; the Server returns an explicit error."""
 
         return await self._request(GET_MEMORY_CAPACITY, request)
 
     async def list_memory_entries(self, request: ListMemoryEntriesRequest) -> ListMemoryEntriesResponse:
-        """List active entries, optionally including inactive entries for audit."""
+        """List current Atomic Memory records with explicit lifecycle states and pagination."""
 
         return await self._request(LIST_MEMORY_ENTRIES, request)
 
-    async def get_memory_entry(self, request: GetMemoryEntryRequest) -> MemoryEntry:
-        """Read one exact Memory entry version."""
-
-        return await self._request(GET_MEMORY_ENTRY, request)
+    async def get_memory_entry(self, request: GetMemoryEntryRequest) -> atomic_models.AtomicMemoryRecord:
+        """Read the current Atomic Memory mapped from a legacy collection and entry target."""
+        response = await self._request(GET_MEMORY_ENTRY, request)
+        return response.root
 
     async def revise_memory_entry(self, request: ReviseMemoryEntryRequest) -> MemoryMutationResponse:
-        """Revise one exact active Memory entry."""
+        """Legacy citation writes are unsupported; use Atomic content Replace with If-Match."""
 
         return await self._request(REVISE_MEMORY_ENTRY, request)
 
@@ -1078,7 +1136,7 @@ class PowerContextClient:
 
         return await self._request(LIST_MEMORY_CHANGES, request)
 
-    async def propose_experience(self, request: ProposeExperienceRequest) -> ArtifactCandidate:
+    async def propose_experience(self, request: ProposeExperienceRequest) -> Candidate:
         """Submit complete Experience content as a pending Candidate."""
 
         return await self._request(PROPOSE_EXPERIENCE, request)
@@ -1093,7 +1151,7 @@ class PowerContextClient:
 
         return await self._request(GET_EXPERIENCE, request)
 
-    async def propose_skill(self, request: ProposeSkillRequest) -> ArtifactCandidate:
+    async def propose_skill(self, request: ProposeSkillRequest) -> Candidate:
         """Submit complete managed Skill content as a pending Candidate."""
 
         return await self._request(PROPOSE_SKILL, request)
@@ -1128,7 +1186,7 @@ class PowerContextClient:
 
         return await self._request(DOWNLOAD_SKILL_PACKAGE, request)
 
-    async def propose_skill_package(self, request: ProposeSkillPackageRequest) -> ArtifactCandidate:
+    async def propose_skill_package(self, request: ProposeSkillPackageRequest) -> Candidate:
         """Create a pending exact package Candidate without LLM rewriting."""
 
         return await self._request(PROPOSE_SKILL_PACKAGE, request)
@@ -1232,30 +1290,33 @@ class PowerContextClient:
 
         return await self._request(IMPORT_EXTERNAL_SKILL, request)
 
-    async def list_artifact_candidates(self, request: ListArtifactCandidatesRequest) -> ArtifactCandidatePage:
+    async def get_candidate_history(self, request: GetCandidateRequest) -> CandidateHistory:
+        return await self._request(GET_CANDIDATE_HISTORY, request)
+
+    async def list_candidates(self, request: ListCandidatesRequest) -> CandidatePage:
         """Page current Candidate heads in the Review Inbox."""
 
-        return await self._request(LIST_ARTIFACT_CANDIDATES, request)
+        return await self._request(LIST_CANDIDATES, request)
 
-    async def get_artifact_candidate(self, request: GetArtifactCandidateRequest) -> ArtifactCandidate:
+    async def get_candidate(self, request: GetCandidateRequest) -> Candidate:
         """Read the current head of one Candidate."""
 
-        return await self._request(GET_ARTIFACT_CANDIDATE, request)
+        return await self._request(GET_CANDIDATE, request)
 
-    async def approve_artifact_candidate(self, request: ApproveArtifactCandidateRequest) -> ArtifactCandidate:
+    async def approve_candidate(self, request: ApproveCandidateRequest) -> Candidate:
         """Approve the exact current Candidate version."""
 
-        return await self._request(APPROVE_ARTIFACT_CANDIDATE, request)
+        return await self._request(APPROVE_CANDIDATE, request)
 
-    async def reject_artifact_candidate(self, request: RejectArtifactCandidateRequest) -> ArtifactCandidate:
+    async def reject_candidate(self, request: RejectCandidateRequest) -> Candidate:
         """Reject the exact current Candidate version."""
 
-        return await self._request(REJECT_ARTIFACT_CANDIDATE, request)
+        return await self._request(REJECT_CANDIDATE, request)
 
-    async def revise_artifact_candidate(self, request: ReviseArtifactCandidateRequest) -> ArtifactCandidate:
+    async def revise_candidate(self, request: ReviseCandidateRequest) -> Candidate:
         """Append a complete replacement Candidate proposal."""
 
-        return await self._request(REVISE_ARTIFACT_CANDIDATE, request)
+        return await self._request(REVISE_CANDIDATE, request)
 
     async def _request(
         self,
@@ -1274,70 +1335,37 @@ class PowerContextClient:
             query_parameters=query_parameters,
         )
 
-        response, request_id = await self._send(
-            method=operation.method,
-            path=path,
-            operation_id=operation.operation_id,
-            json_payload=json_payload,
-            query_parameters=request_query,
-            extra_headers=extra_headers,
-            response_headers=response_headers,
-            success_statuses=(
-                (*operation.success_statuses, 304) if 304 in operation.responses else operation.success_statuses
-            ),
-        )
-
-        if response.status_code in {204, 304}:
-            return cast(_ResponseT, None)
+        span = ClientSpan.start(operation.operation_id)
         try:
-            response_type = operation.success_response_types[response.status_code]
-            return cast(_ResponseT, TypeAdapter(response_type).validate_json(response.content))
-        except ValidationError as exc:
-            raise InvalidResponseError(
-                path,
-                request_id=request_id,
-            ) from exc
-
-    async def _send(
-        self,
-        *,
-        method: str,
-        path: str,
-        operation_id: str,
-        success_statuses: tuple[int, ...],
-        json_payload: Any = None,
-        query_parameters: Any = None,
-        extra_headers: Mapping[str, str] | None = None,
-        response_headers: dict[str, str] | None = None,
-    ) -> tuple[httpx.Response, str | None]:
-        headers = {} if self._headers is None else dict(self._headers)
-        if extra_headers is not None:
-            headers.update(extra_headers)
-        span = ClientSpan.start(operation_id)
-        try:
+            headers = {} if self._headers is None else dict(self._headers)
+            if extra_headers is not None:
+                headers.update(extra_headers)
             span.inject(headers)
             response = await self._http_client.request(
-                method,
+                operation.method,
                 f"{self._base_url}{path}",
                 json=json_payload,
                 headers=headers,
-                params=query_parameters,
+                params=request_query or None,
             )
         except asyncio.CancelledError as error:
             span.finish("cancelled", error=error)
             raise
-        except httpx.HTTPError as error:
-            span.finish("failure", error=error)
-            raise TransportError(path) from error
+        except httpx.HTTPError as exc:
+            span.finish("failure", error=exc)
+            raise TransportError(path) from exc
         except BaseException as error:
             span.finish("failure", error=error)
             raise
-        success = response.status_code in success_statuses
-        span.finish("success" if success else "failure", status_code=response.status_code)
+        declared_not_modified = response.status_code == 304 and 304 in operation.responses
+        declared_success = 200 <= response.status_code < 300 and response.status_code in operation.responses
+        succeeded = declared_success or declared_not_modified
+        span.finish("success" if succeeded else "failure", status_code=response.status_code)
+
         request_id = response.headers.get(REQUEST_ID_HEADER)
         if response_headers is not None:
             response_headers.update(response.headers)
-        if not success:
+        if not succeeded:
             error = _decode_error(response.content)
             raise server_response_error(
                 status_code=response.status_code,
@@ -1346,7 +1374,17 @@ class PowerContextClient:
                 message=None if error is None else error.error.message,
                 details=None if error is None else error.error.details,
             )
-        return response, request_id
+
+        if response.status_code in {204, 304} or operation.response_type is None:
+            return cast(_ResponseT, None)
+
+        try:
+            return TypeAdapter(operation.response_type).validate_json(response.content)
+        except ValidationError as exc:
+            raise InvalidResponseError(
+                path,
+                request_id=request_id,
+            ) from exc
 
 
 def _prepare_request(
@@ -1374,6 +1412,17 @@ def _prepare_request(
             and "assembly" not in request.model_fields_set
         ):
             payload.pop("assembly", None)
+        if (
+            operation is PREPARE_CONTEXT
+            and isinstance(request, PrepareContextRequest)
+            and not payload.get("explain", False)
+        ):
+            # ``PREPARE_CONTEXT`` serializes its defaults because an older Server needs the fields
+            # it already knows about. ``explain`` is not one of them: a Server that predates it
+            # rejects the key with ``422 invalid_request``, so a client upgraded ahead of its
+            # Server must not volunteer a flag whose default means "say nothing extra". ``false``
+            # and absence are the same request.
+            payload.pop("explain", None)
         if operation.request_location == "query":
             request_query.update({key: value for key, value in payload.items() if value is not None})
         else:
@@ -1416,18 +1465,3 @@ def _decode_error(content: bytes) -> ErrorResponse | None:
         return ErrorResponse.model_validate_json(content)
     except ValidationError:
         return None
-
-
-def _flush_response_from_operation(operation: OperationRecord) -> FlushMemoryResponse:
-    result = operation.result
-    if not isinstance(result, MemoryOperationResult):
-        raise InvalidResponseError(GET_OPERATION.path, request_id=None)
-    flush_status = FlushStatus.PROCESSED if result.current_cursor > result.previous_cursor else FlushStatus.IDLE
-    return FlushMemoryResponse(
-        status=flush_status,
-        previous_cursor=result.previous_cursor,
-        current_cursor=result.current_cursor,
-        high_watermark=result.high_watermark,
-        processed_source_count=result.processed_source_count,
-        memory=result.memory,
-    )

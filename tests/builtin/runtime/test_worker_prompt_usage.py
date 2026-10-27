@@ -27,10 +27,11 @@ import pytest
 from pydantic import AnyHttpUrl
 from sqlalchemy import func, select
 
+from powercontext.builtin.artifacts.atomic_memory.extraction import AtomicMemoryExtractionOutput
 from powercontext.builtin.artifacts.memory import EmbeddingProfile
 from powercontext.builtin.artifacts.memory.prompts import MemoryExtractionProfile
 from powercontext.builtin.artifacts.prompt import PromptError
-from powercontext.builtin.inference import EmbeddingResult
+from powercontext.builtin.inference import EmbeddingResult, GenerationResult
 from powercontext.builtin.inference.models import InferenceUsage
 from powercontext.builtin.inference.usage import UsageReportingEmbeddingModel, bind_usage_reporter
 from powercontext.builtin.persistence.cursors import SourceCursorRepository
@@ -38,9 +39,9 @@ from powercontext.builtin.persistence.processing_intents import ArtifactProcessi
 from powercontext.builtin.persistence.sqlite import SQLiteConfig, SQLiteProfile
 from powercontext.builtin.persistence.supervision import ArtifactProcessingLeaseRepository
 from powercontext.builtin.persistence.tables import (
-    ARTIFACT_CANDIDATE_HEADS_TABLE,
     ARTIFACT_HEADS_TABLE,
     BUILTIN_TABLES,
+    CANDIDATE_HEADS_TABLE,
     MODEL_USAGE_DAILY_TABLE,
 )
 from powercontext.builtin.records import ArtifactWrite
@@ -55,6 +56,7 @@ from powercontext.builtin.statistics import ModelUsagePurpose
 from powercontext.server.authz import PrincipalRef
 from powercontext.server.authz.repository import ACCESS_OWNERS_TABLE, ACCESS_TABLES
 from powercontext.server.processing_security import WorkerSecuritySpec
+from tests.e2e.dream_support import atomic_memory_pipeline
 
 
 class _InferenceServer(ThreadingHTTPServer):
@@ -79,13 +81,30 @@ class _InferenceHandler(BaseHTTPRequestHandler):
             }
         else:
             if server.family == "memory":
-                candidate = {
-                    "intent": "add",
-                    "kind": "preference",
-                    "text": "The user requires spawned Worker validation.",
-                    "evidence_ids": ["source:0"],
-                }
-                output = {"candidates": [candidate]}
+                request = json.loads(
+                    next(message["content"] for message in payload["messages"] if message["role"] == "user")
+                )
+                if "proposal" in request:
+                    output = {
+                        "action": "create",
+                        "compared_ids": [item["item_id"] for item in request["related"]],
+                        "content": {
+                            "kind": request["proposal"]["kind"],
+                            "text": request["proposal"]["text"],
+                        },
+                        "evidence_ids": request["proposal"]["evidence_ids"],
+                        "reason": "Retain this independent fixture preference.",
+                    }
+                else:
+                    output = {
+                        "candidates": [
+                            {
+                                "kind": "preference",
+                                "text": "The user requires spawned Worker validation.",
+                                "evidence_ids": [item["evidence_id"] for item in request["evidence"]],
+                            }
+                        ]
+                    }
             elif server.family == "profile":
                 output = {"content": "# Profile\n\n- Spawned Worker used custom guidance."}
             else:
@@ -124,8 +143,18 @@ class _InferenceHandler(BaseHTTPRequestHandler):
         pass
 
 
-@pytest.mark.parametrize("family", ["memory", "experience", "profile"])
-def test_spawned_worker_restores_custom_prompt_and_counts_actual_requests_once(tmp_path, monkeypatch, family):
+@pytest.mark.parametrize(
+    ("family", "prompt_key"),
+    [
+        ("memory", "atomic_memory.extract"),
+        ("memory", "atomic_memory.reconcile"),
+        ("experience", "experience.incubate"),
+        ("profile", "profile.generate"),
+    ],
+)
+def test_spawned_worker_restores_custom_prompt_and_counts_actual_requests_once(
+    tmp_path, monkeypatch, family, prompt_key
+):
     # A configured loopback provider crosses the real spawn/serialization boundary:
     # no injected pipeline, model monkeypatch, or preconstructed PromptRegistry reaches the child.
     monkeypatch.setenv("OPENAI_API_KEY", "hermetic-worker-key")
@@ -152,11 +181,6 @@ def test_spawned_worker_restores_custom_prompt_and_counts_actual_requests_once(t
                 memory_extraction_profile=MemoryExtractionProfile.CONVERSATION,
             ),
         )
-        prompt_key = {
-            "memory": "memory.extract",
-            "experience": "experience.incubate",
-            "profile": "profile.generate",
-        }[family]
         marker = f"PERSISTED_CUSTOM_{family.upper()}_GUIDANCE"
         async with open_builtin_runtime(config) as runtime:
             assert runtime.scopes is not None
@@ -224,41 +248,50 @@ def test_spawned_worker_restores_custom_prompt_and_counts_actual_requests_once(t
                         completed is not None and completed.handled_generation == assignment.claimed_request_generation
                     )
                     assert completed.clean_generation == completed.dirty_generation
-                    generated = ARTIFACT_CANDIDATE_HEADS_TABLE if family == "experience" else ARTIFACT_HEADS_TABLE
+                    generated = CANDIDATE_HEADS_TABLE if family == "experience" else ARTIFACT_HEADS_TABLE
                     assert (
                         await connection.scalar(
-                            select(func.count()).select_from(generated).where(generated.c.family == family)
+                            select(func.count())
+                            .select_from(generated)
+                            .where(generated.c.family == ("atomic-memory" if family == "memory" else family))
                         )
                         == 1
                     )
                     assert await connection.scalar(select(func.count()).select_from(ACCESS_OWNERS_TABLE)) == 1
                     usage = (await connection.execute(select(MODEL_USAGE_DAILY_TABLE))).mappings().all()
                 generation = [row for row in usage if row["operation"] == "generation"]
-                if family == "profile":
-                    assert generation == []
-                else:
-                    assert len(generation) == 1
-                    assert generation[0]["scope_id"] == scope
-                    assert generation[0]["purpose"] == (
-                        "memory_extraction" if family == "memory" else "experience_generation"
-                    )
-                    assert generation[0]["requests"] == 1
-                    assert generation[0]["input_tokens"] == 11
-                    assert generation[0]["output_tokens"] == 13
+                assert len(generation) == 1
+                assert generation[0]["scope_id"] == scope
+                assert (
+                    generation[0]["purpose"]
+                    == {
+                        "memory": "memory_extraction",
+                        "experience": "experience_generation",
+                        "profile": "profile_generation",
+                    }[family]
+                )
+                # A custom extraction or reconciliation Prompt keeps the comparison of a candidate with nothing to
+                # compare, so each memory case makes two requests.
+                requests = 2 if family == "memory" else 1
+                assert generation[0]["requests"] == requests
+                assert generation[0]["input_tokens"] == 11 * requests
+                assert generation[0]["output_tokens"] == 13 * requests
                 embedding = [row for row in usage if row["operation"] == "embedding"]
                 if family == "memory":
                     assert len(embedding) == 1
                     assert embedding[0]["scope_id"] == scope
                     assert embedding[0]["purpose"] == "memory_indexing"
-                    assert embedding[0]["requests"] == 1
-                    assert embedding[0]["input_tokens"] == 7
+                    # Auto related recall embeds the candidate query, then
+                    # publication embeds the accepted independent Artifact.
+                    assert embedding[0]["requests"] == 2
+                    assert embedding[0]["input_tokens"] == 14
                 else:
                     assert embedding == []
                 calls = [payload for path, payload in server.requests if path == "/v1/chat/completions"]
-                assert len(calls) == 1
-                assert marker in json.dumps(calls[0])
+                assert len(calls) == requests
+                assert marker in json.dumps(calls[1 if prompt_key == "atomic_memory.reconcile" else 0])
                 assert len([path for path, _ in server.requests if path == "/v1/embeddings"]) == (
-                    1 if family == "memory" else 0
+                    2 if family == "memory" else 0
                 )
 
     try:
@@ -306,6 +339,10 @@ def test_shared_prompt_composition_preserves_missing_provider_and_injected_rejec
         async def generate(self, value):
             return None
 
+    class MemoryExtractor:
+        async def generate(self, request):
+            return GenerationResult(output=AtomicMemoryExtractionOutput())
+
     async def scenario():
         config = BuiltinConfig(
             inference=InferenceConfig(generation_model="test" if injected else None),
@@ -314,7 +351,7 @@ def test_shared_prompt_composition_preserves_missing_provider_and_injected_rejec
         pipeline = Pipeline()
         async with open_builtin_runtime(
             config,
-            candidate_pipeline=pipeline if injected and family == "memory" else None,
+            candidate_pipeline=atomic_memory_pipeline(MemoryExtractor()) if injected and family == "memory" else None,
             experience_pipeline=pipeline if injected and family == "experience" else None,
             profile_generator=pipeline if injected and family == "profile" else None,
         ) as runtime:
@@ -323,7 +360,7 @@ def test_shared_prompt_composition_preserves_missing_provider_and_injected_rejec
                 await runtime.scopes.create(ScopeDraft(title="Prompt", summary="Prompt", idempotency_key="prompt"))
             ).scope_id
             key = {
-                "memory": "memory.extract",
+                "memory": "atomic_memory.extract",
                 "experience": "experience.incubate",
                 "profile": "profile.generate",
             }[family]
