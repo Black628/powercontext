@@ -116,6 +116,8 @@ cd qoder
 .venv/bin/python scripts/smoke.py --base-url http://127.0.0.1:8848
 ```
 
+更完整的分步核对（初始数据、输入、预期结果、证据记录）见 [`docs/verification-sample.md`](docs/verification-sample.md)。
+
 脚本只用标准库，依次执行并打印可核对结果：
 
 1. 读取 `/api/status`，打印后端与记忆状态；
@@ -134,7 +136,7 @@ cd qoder
 2. 「开始复习」选择「操作系统」，3 张卡；
 3. 顶部出现「PowerContext 记得的你」（主通道下为真实上下文；镜像模式显示离线提示）；
 4. 第一张卡故意选错 → 出现正确答案、掌握度、seekdb 相关原文；
-5. 右栏「学习者记忆」出现一条 weakness 记录，可点「修正」「失效」；
+5. 右栏「学习记忆」出现一条 weakness 记录，可点「修正」「失效」；
 6. 展开「执行记录」，可逐条看到 `l2_distance ... APPROXIMATE` 与 `MATCH ... AGAINST` 的 SQL，以及 `POST /v1/memory/remember` 的请求与响应；
 7. 再开一轮，顶部上下文应出现上一轮的薄弱点，且该知识点优先出现。
 
@@ -229,7 +231,8 @@ qoder/
 │   └── start.sh           # Linux/macOS 启动
 ├── docs/
 │   ├── qoder-development-record.md   # Qoder 开发记录（提交材料）
-│   └── website.md                     # Qoder Sites 文案
+│   ├── verification-sample.md        # 可复现的验证样例
+│   └── website.md                    # Qoder Sites 文案
 ├── requirements.txt
 └── .env.example
 ```
