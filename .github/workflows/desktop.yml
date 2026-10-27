@@ -246,11 +246,11 @@ jobs:
       - run: pnpm ipc:check
       - name: Verify Linux Secret Service across processes
         run: |
-        dbus-run-session -- bash -lc '
-        set -euo pipefail
-        eval "$(gnome-keyring-daemon --start --components=secrets)"
-        cargo run --locked --manifest-path src-tauri/Cargo.toml --example credential_probe
-      '
+          dbus-run-session -- bash -lc '
+            set -euo pipefail
+            eval "$(gnome-keyring-daemon --start --components=secrets)"
+            cargo run --locked --manifest-path src-tauri/Cargo.toml --example credential_probe
+          '
       - name: Build unsigned Debian package
         run: pnpm tauri build --bundles deb --ci -- --locked
       - name: Verify Debian package
