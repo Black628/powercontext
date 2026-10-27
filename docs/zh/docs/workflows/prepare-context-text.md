@@ -9,6 +9,74 @@ description: 选择 Memory、Experience、Profile 和 Topic Memory 的输出类�
 已批准的 Experience、正式 Profile 快照和 Topic Memory，调整章节顺序、限制条数，并展示召回位置和置信度状态。请使用已存在且具有读取权限的
 Scope；读取其引用的其他 Scope 也需要对应权限。
 
+## 在 Python 中增量传输上下文
+
+`runtime.context.for_scope(scope_id).prepare_incremental(request, base_pack=None)` 在首次请求时返回完整
+`ContextPack`，调用方提供完整基包后返回 `ContextPackDelta`。它调用普通 `prepare`，保留原有 Scope 鉴权、
+检索、预算、精确引用、历史数据信任提示和最终正文。普通空结果 `content=None` 对应空 Pack。
+此入口属于 Python Runtime 接口，HTTP 和 MCP 接口继续使用现有行为。
+
+发送端和接收端通过字节数据交换，各自保留完整基包：
+
+```python
+from powercontext.builtin.runtime import (
+    ContextPack,
+    ContextPackDelta,
+    apply_context_pack_delta,
+)
+
+
+async def send(context, request, base_wire: bytes | None = None) -> bytes:
+    base = None if base_wire is None else ContextPack.from_bytes(base_wire)
+    packet = await context.prepare_incremental(request, base_pack=base)
+    return packet.to_bytes()
+
+
+def receive(wire: bytes, base_wire: bytes | None = None) -> ContextPack:
+    if base_wire is None:
+        return ContextPack.from_bytes(wire)
+    return apply_context_pack_delta(
+        ContextPack.from_bytes(base_wire), ContextPackDelta.from_bytes(wire)
+    )
+```
+
+收到一帧后，拼接 `packet.items` 即可还原原始 UTF-8 正文，并将 `packet.to_bytes()` 保留为下一轮完整基包。
+Delta 本身不能作为完整基包。重建不依赖发送端缓存或共享 Python 对象。基包不匹配、前缀越界或目标摘要不符时，
+抛出 `ContextPackError`；调用方可不传基包，重新请求完整包以恢复同步。
+
+`ContextPack.from_content(content, chunk_bytes=512)` 保留全部原始字节，确定性地产生各自有效且不超过正整数字节
+上限的 UTF-8 分块，在上限内优先沿换行切分。如果上限无法容纳某个字符，则抛出 `ContextPackError`。
+`ContextPack.build(items)` 保留传入 bytes 元组的内容及精确分块边界。
+`ContextPackDelta.between(base, target)` 复用最长相同前缀并携带完整剩余后缀，支持正文首部、中部修改以及转为空结果。
+
+完整包恰好包含 `schema`、`items`、`digest`、`byte_count`，schema 为 `powercontext.context-pack.v1`。
+Delta 恰好包含 `schema`、`base_digest`、`target_digest`、`prefix_items`、`appended`，schema 为
+`powercontext.context-pack-delta.v1`。分块数组使用规范的标准 Base64，序列化为键排序、无多余空白的 UTF-8 JSON。
+Pack 摘要是仅含 schema 和编码后 items 的上述 JSON 的 SHA-256；`byte_count` 包括该字段自身。
+Delta 的 `byte_count` 等于实际序列化字节数，不额外写入 wire。解码器拒绝缺失、额外、重复、格式错误或不一致的字段，
+包括布尔或小数类型的前缀长度。
+
+### 测量传输成本
+
+使用 `pytest -s` 运行 `tests/e2e/test_incremental_context_pack.py` 可输出完整测量 JSON。离线 QMSum 样例和
+序列见 `tests/fixtures/context_pack/README.md`：从八条真实会议 turn 开始，执行四十轮请求，追加四条原始 turn，
+并切换查询。每一轮都将独立重建的字节与原生普通 `prepare` 比较，要求结果非空，并统计首次完整包及后续 Delta
+的实际序列化字节数。
+
+以下测量使用公开 Linux x86_64 Python 3.12 自测镜像、固定依赖、关闭外部网络及公开的 1 CPU / 2 GiB 配额，
+共产生八种不同上下文：
+
+| 传输方式 | 累计字节数 | 增量协议相对该对照的节省率 |
+| --- | ---: | ---: |
+| 普通完整 UTF-8 正文 | 48,886 | 57.04% |
+| 每轮完整 v1 Pack | 71,878 | 70.79% |
+| 每轮独立 gzip，级别 9、`mtime=0` | 26,976 | 22.16% |
+| 首次完整 Pack 和后续 Delta | 20,999 | — |
+
+测量包括 JSON、Base64、摘要和全部协议字段。每次运行都会分配引用 ID，因此 gzip 字节数可能有小幅变化。
+节省率取决于序列中的实际变化与重复情况，此公开测量序列不替代组织方未公开的 workload。
+gzip 比较是观测对照，在其他序列中可能出现负值。
+
 ## 选择类别和顺序
 
 把下面的请求保存为 `prepare.json`，将 `scope_id` 替换成实际 Scope ID：

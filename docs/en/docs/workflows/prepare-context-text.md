@@ -10,6 +10,80 @@ approved Experience, committed Profile snapshots, and Topic Memory, arrange thei
 rank and confidence status.
 Use an existing Scope that you can read; reading referenced Scopes also requires permission.
 
+## Transfer prepared context incrementally from Python
+
+`runtime.context.for_scope(scope_id).prepare_incremental(request, base_pack=None)` returns a complete `ContextPack`
+for the first request and a `ContextPackDelta` when the caller supplies a complete base pack. It calls ordinary
+`prepare`, preserving its scope authorization, retrieval, budgets, exact citations, trust wrapper, and final text.
+An ordinary empty result (`content=None`) becomes an empty pack. This is a Python Runtime interface; the HTTP and MCP
+interfaces retain their existing behavior.
+
+The sender and receiver exchange bytes and each retains its own complete base packet:
+
+```python
+from powercontext.builtin.runtime import (
+    ContextPack,
+    ContextPackDelta,
+    apply_context_pack_delta,
+)
+
+
+async def send(context, request, base_wire: bytes | None = None) -> bytes:
+    base = None if base_wire is None else ContextPack.from_bytes(base_wire)
+    packet = await context.prepare_incremental(request, base_pack=base)
+    return packet.to_bytes()
+
+
+def receive(wire: bytes, base_wire: bytes | None = None) -> ContextPack:
+    if base_wire is None:
+        return ContextPack.from_bytes(wire)
+    return apply_context_pack_delta(
+        ContextPack.from_bytes(base_wire), ContextPackDelta.from_bytes(wire)
+    )
+```
+
+After receiving a frame, join `packet.items` to recover the exact UTF-8 context bytes, and retain `packet.to_bytes()`
+as the next complete base. A delta is not itself a complete base. Neither side needs a sender cache or shared Python
+objects. A mismatched base, prefix outside the base, or incorrect reconstructed target fails with `ContextPackError`;
+the caller can resynchronize by requesting another complete packet without a base.
+
+`ContextPack.from_content(content, chunk_bytes=512)` preserves all original bytes and creates deterministic, individually
+valid UTF-8 chunks no larger than the positive integer ceiling. It prefers line endings inside that ceiling; a ceiling
+too small for a character raises `ContextPackError`. `ContextPack.build(items)` retains a supplied bytes tuple and its
+exact chunk boundaries. `ContextPackDelta.between(base, target)` reuses the longest identical prefix and supplies the
+complete remaining suffix, including edits at the beginning or middle and transitions to empty content.
+
+Complete packets contain exactly `schema`, `items`, `digest`, and `byte_count`, with schema
+`powercontext.context-pack.v1`. Deltas contain exactly `schema`, `base_digest`, `target_digest`, `prefix_items`, and
+`appended`, with schema `powercontext.context-pack-delta.v1`. Chunk arrays use canonical standard Base64. Serialization
+uses sorted compact UTF-8 JSON. A pack's digest is SHA-256 of the JSON containing only its schema and encoded items.
+Its `byte_count` includes the byte-count field itself. A delta's `byte_count` equals its actual serialized size and is
+not an additional wire field. Decoders reject missing, extra, duplicate, malformed, or inconsistent fields, including
+boolean and fractional prefixes.
+
+### Measure transmission cost
+
+Run `tests/e2e/test_incremental_context_pack.py` with `pytest -s` to print the complete measurement JSON. Its offline
+QMSum fixture and sequence are documented in `tests/fixtures/context_pack/README.md`: start with eight actual meeting
+turns, execute forty requests, append four more original turns, and switch queries. Every round compares independently
+reconstructed bytes with native ordinary `prepare`, requires a nonempty result, and measures the actual serialized
+first packet and subsequent deltas.
+
+The following run used the published Linux x86_64 Python 3.12 self-test image, its fixed dependencies, no external
+network, and the published 1 CPU / 2 GiB resource limits. It produced eight distinct contexts:
+
+| Transmission | Total bytes | Incremental saving against this baseline |
+| --- | ---: | ---: |
+| Ordinary full UTF-8 context | 48,886 | 57.04% |
+| Complete v1 pack on every round | 71,878 | 70.79% |
+| Independent per-round gzip, level 9, `mtime=0` | 26,976 | 22.16% |
+| First complete pack and subsequent deltas | 20,999 | — |
+
+The measurement includes JSON, Base64, digests, and all protocol fields. Citation IDs are allocated for each run, so
+gzip totals can vary slightly. Savings depend on the actual changes and repetition in a sequence; the documented
+sequence does not substitute for the organizer's unpublished workload. The gzip comparison is observational and can
+be negative on other sequences.
+
 ## Select and order sections
 
 Save this request as `prepare.json`, replacing `scope_id` with your Scope ID:
