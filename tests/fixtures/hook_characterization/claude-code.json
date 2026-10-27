@@ -56,7 +56,7 @@
     },
     "slow-context": {
       "status": 200,
-      "delay": 2,
+      "delay": 5,
       "json": {
         "schema": "powercontext.prepared-context.v1",
         "status": "ready",
@@ -3155,7 +3155,7 @@
         {
           "hook": "hooks/user_prompt_submit.py",
           "environment": {
-            "POWERCONTEXT_CLAUDE_REQUEST_TIMEOUT_SECONDS": "0.3"
+            "POWERCONTEXT_CLAUDE_REQUEST_TIMEOUT_SECONDS": "1"
           },
           "payload": {
             "session_id": "session-a",

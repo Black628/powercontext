@@ -54,7 +54,7 @@
     },
     "slow-context": {
       "status": 200,
-      "delay": 2,
+      "delay": 5,
       "json": {
         "schema": "powercontext.prepared-context.v1",
         "status": "ready",
@@ -1962,7 +1962,7 @@
         {
           "hook": "hooks/recall.py",
           "environment": {
-            "POWERCONTEXT_CODEX_REQUEST_TIMEOUT_SECONDS": "0.3"
+            "POWERCONTEXT_CODEX_REQUEST_TIMEOUT_SECONDS": "1"
           },
           "payload": {
             "session_id": "thread-a",
