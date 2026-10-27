@@ -47,7 +47,7 @@
 .venv\Scripts\python.exe dify\scripts\pc_http_demo.py --player shen
 ```
 
-## 关于 `chatflow-replay.py` 的边界
+## 关于 `replay_chatflow.py` 的边界
 
 它复刻的是 **Dify 的图执行与 HTTP 调用**，不模拟 Dify 的模型层：
 
