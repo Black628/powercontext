@@ -15,12 +15,14 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import io
+import zlib
 
 import pytest
 from pypdf import PdfWriter
-from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject, NumberObject
+from pypdf.generic import ArrayObject, DecodedStreamObject, DictionaryObject, NameObject, NumberObject
 
 from powercontext.sources import SourceDefinitionRegistry, SourceMaterialization, TextEvidence
 from powercontext.sources.pdf_pages import (
@@ -36,7 +38,9 @@ _OWNER_PASSWORD = "test-owner"  # noqa: S105 - deterministic encryption fixture
 _USER_PASSWORD = "test-user"  # noqa: S105 - deterministic encryption fixture
 
 
-def _document(*, password: str | None = None, broken_tail: bool = False) -> bytes:
+def _document(
+    *, password: str | None = None, broken_tail: bool = False, algorithm: str = "RC4-128", indirect_filter: bool = False
+) -> bytes:
     writer = PdfWriter()
     font = DictionaryObject({
         NameObject("/Type"): NameObject("/Font"),
@@ -49,12 +53,15 @@ def _document(*, password: str | None = None, broken_tail: bool = False) -> byte
     })
     stream = DecodedStreamObject()
     stream.set_data(b"BT /F1 12 Tf 50 700 Td (Revenue 2025 1,234.56) Tj 0 -20 Td (Net income 789) Tj ET")
+    if indirect_filter:
+        stream = stream.flate_encode()
+        stream[NameObject("/Filter")] = writer._add_object(NameObject("/FlateDecode"))
     page[NameObject("/Contents")] = stream
     tail = writer.add_blank_page(width=612, height=792)
     if broken_tail:
         tail[NameObject("/Contents")] = NumberObject(7)
     if password is not None:
-        writer.encrypt(user_password=password, owner_password=_OWNER_PASSWORD)
+        writer.encrypt(user_password=password, owner_password=_OWNER_PASSWORD, algorithm=algorithm)
     buffer = io.BytesIO()
     writer.write(buffer)
     return buffer.getvalue()
@@ -85,8 +92,9 @@ def test_full_text_numbers_blanks_and_source_roundtrip() -> None:
     }
 
 
-def test_empty_password_permission_pdf_preserves_text() -> None:
-    raw = _document(password="")
+@pytest.mark.parametrize("algorithm", ["RC4-128", "AES-128", "AES-256"])
+def test_empty_password_permission_pdf_preserves_text(algorithm: str) -> None:
+    raw = _document(password="", algorithm=algorithm)
     pages = parse_pdf_document(PDFDocumentInput(document_id="permissions", content=raw))
     assert len(pages) == 2 and "1,234.56" in pages[0].text
 
@@ -132,3 +140,56 @@ def test_manually_supplied_pages_validate_location(changes: dict[str, object]) -
         PDFPageInput.model_validate(
             {"document_id": "report", "document_sha256": "a" * 64, "page_number": 1, "text": ""} | changes
         )
+
+
+def test_corrupt_compressed_page_is_not_silently_returned_as_blank() -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=100, height=200)
+    stream = DecodedStreamObject()
+    contents = b"BT (must not silently disappear) Tj ET"
+    stream.set_data(contents)
+    page[NameObject("/Contents")] = stream.flate_encode()
+    output = io.BytesIO()
+    writer.write(output)
+    encoded = zlib.compress(contents)
+    raw = output.getvalue()
+    assert encoded in raw
+    # Keep byte offsets and Length valid, but corrupt the zlib checksum.
+    damaged = raw.replace(encoded, encoded[:-4] + b"\x00\x00\x00\x00", 1)
+    with pytest.raises(ValueError):
+        parse_pdf_document(PDFDocumentInput(document_id="corrupt-stream", content=damaged))
+
+
+def test_chained_filters_preserve_complete_text_and_reject_corruption() -> None:
+    writer = PdfWriter()
+    page = writer.add_blank_page(width=100, height=200)
+    page[NameObject("/Resources")] = DictionaryObject({
+        NameObject("/Font"): DictionaryObject({
+            NameObject("/F1"): DictionaryObject({
+                NameObject("/Type"): NameObject("/Font"),
+                NameObject("/Subtype"): NameObject("/Type1"),
+                NameObject("/BaseFont"): NameObject("/Helvetica"),
+            })
+        })
+    })
+    stream = DecodedStreamObject()
+    original = b"BT /F1 12 Tf (Revenue 12345 and operating income 6789) Tj ET"
+    encoded = base64.a85encode(zlib.compress(original)) + b"~>"
+    stream.set_data(encoded)
+    stream[NameObject("/Filter")] = ArrayObject([NameObject("/ASCII85Decode"), NameObject("/FlateDecode")])
+    page[NameObject("/Contents")] = stream
+    output = io.BytesIO()
+    writer.write(output)
+    pages = parse_pdf_document(PDFDocumentInput(document_id="filter-chain", content=output.getvalue()))
+    assert "12345" in pages[0].text and "6789" in pages[0].text
+    corrupt = base64.a85encode(zlib.compress(original)[:-4] + b"\x00\x00\x00\x00") + b"~>"
+    assert len(corrupt) == len(encoded)
+    with pytest.raises(ValueError):
+        parse_pdf_document(
+            PDFDocumentInput(document_id="filter-chain", content=output.getvalue().replace(encoded, corrupt, 1))
+        )
+
+
+def test_indirect_compression_filter_is_a_readable_pdf() -> None:
+    pages = parse_pdf_document(PDFDocumentInput(document_id="indirect-filter", content=_document(indirect_filter=True)))
+    assert len(pages) == 2 and "Revenue 2025 1,234.56" in pages[0].text

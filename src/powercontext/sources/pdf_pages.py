@@ -21,6 +21,7 @@ import io
 import json
 import math
 import re
+import zlib
 from collections import Counter
 from typing import TYPE_CHECKING, Literal
 
@@ -32,6 +33,7 @@ from powercontext.sources.projections import TEXT_EVIDENCE_PROJECTION_KEY, TextE
 
 if TYPE_CHECKING:
     from pypdf import PageObject
+    from pypdf.generic import StreamObject
 
     from powercontext.artifacts import MemoryCitation
     from powercontext.builtin.runtime import MemoryEntryRecord, ScopedMemoryApplication
@@ -136,9 +138,40 @@ def _extract_page_text(page: PageObject) -> str:
         if not isinstance(contents, NullObject):
             streams = contents if isinstance(contents, ArrayObject) else (contents,)
             for stream in streams:
-                if not isinstance(stream.get_object(), StreamObject):
+                resolved = stream.get_object()
+                if not isinstance(resolved, StreamObject):
                     raise TypeError("PDF page contents must be streams")  # noqa: TRY003
+                _validate_compression(resolved)
     return page.extract_text()
+
+
+def _validate_compression(stream: StreamObject) -> None:
+    """Reject incomplete Flate data before pypdf's best-effort decoder repairs it."""
+
+    from pypdf.filters import decode_stream_data
+    from pypdf.generic import ArrayObject, DecodedStreamObject, NameObject
+
+    filters = stream.get("/Filter", ())
+    if isinstance(filters, NameObject):
+        filters = (filters,)
+    if not any(name in ("/FlateDecode", "/Fl") for name in filters):
+        return
+    # Use the public serialization API to access the encoded payload. Reading
+    # get_data() here would already discard checksum/EOF failures in pypdf.
+    buffer = io.BytesIO()
+    stream.write_to_stream(buffer)
+    encoded = buffer.getvalue().split(b"\nstream\n", 1)[1].rsplit(b"\nendstream", 1)[0]
+    parameters = stream.get("/DecodeParms")
+    for index, name in enumerate(filters):
+        if name in ("/FlateDecode", "/Fl"):
+            prefix = DecodedStreamObject()
+            prefix.set_data(encoded)
+            prefix[NameObject("/Filter")] = ArrayObject(list(filters[:index]))
+            if parameters is not None:
+                prefix[NameObject("/DecodeParms")] = (
+                    ArrayObject(parameters[:index]) if isinstance(parameters, ArrayObject) else parameters
+                )
+            zlib.decompress(decode_stream_data(prefix))
 
 
 class _PDFPageAdapter:
@@ -177,6 +210,9 @@ PDF_PAGE_SOURCE_DEFINITION: SourceDefinition[PDFPageInput, PDFPageSource, PDFPag
 )
 
 _WORDS = re.compile(r"[a-z]+|\d+")
+_IDENTITY_WORDS = re.compile(r"[a-z0-9]+")
+_REPORT_YEAR = re.compile(r"(?<!\d)(?:19|20)\d{2}(?!\d)")
+_REPORT_SUFFIXES = frozenset({"10k", "10q", "8k", "annual", "report", "form", "dated", "inc", "corp", "company", "plc"})
 
 
 def _tokens(text: str) -> list[str]:
@@ -196,7 +232,8 @@ _STOPWORDS = frozenset(
         "if so but into through between during per using use used based about out over under "
         "give answer respond response question calculate define assuming perspective investment "
         "analyst details shown relying directly explicitly outlined primarily reported important "
-        "state usd million millions billion billions fy fiscal year years"
+        "state usd million millions billion billions fy fiscal year years period periods "
+        "increase increased decrease decreased change changed compare comparison"
     )
 )
 # General accounting vocabulary, independent of companies, reports and questions.
@@ -210,6 +247,8 @@ _CONCEPTS = (
         "country",
         "segment",
         "international",
+        "business",
+        "division",
     ),
     ("legal", "lawsuit", "litigation", "proceeding", "contingency", "battle"),
     ("restructuring", "reorganization", "realignment", "severance"),
@@ -221,6 +260,7 @@ _CONCEPTS = (
     ("balance sheet", "financial position"),
     ("d a", "depreciation amortization"),
     ("inventory", "stock", "inventories"),
+    ("debt", "borrowing", "indebtedness"),
 )
 # Metric names expand toward their supporting statement lines. The reverse
 # direction would turn an ordinary revenue question into many unrelated ratios.
@@ -263,6 +303,20 @@ _STATEMENT_HEADINGS = (
         ),
     ),
 )
+_BUSINESS_HEADING = re.compile(
+    r"^\s*(?:item\s+\d+[a-z]?\.?\s*)?(?:our\s+(?:company|business|divisions?)|business|"
+    r"(?:geographic|reportable|operating)\s+segments?)\s*[.:]?\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+_GEOGRAPHY_TERMS = frozenset({
+    "geography",
+    "geographic",
+    "geographical",
+    "region",
+    "country",
+    "international",
+    "market",
+})
 
 
 def _query_terms(question: str) -> tuple[dict[str, float], tuple[tuple[str, ...], ...]]:
@@ -321,7 +375,40 @@ async def search_pdf_pages(
                 seen.add(identity)
     if not records:
         return ()
-    return _rank_pages(records, terms, phrases, limit)
+    return _rank_pages(_select_reports(records, question), terms, phrases, limit)
+
+
+def _select_reports(records: list[MemoryEntryRecord], question: str) -> list[MemoryEntryRecord]:
+    """Honor explicit report identities before ranking page content across companies."""
+
+    question_words = _IDENTITY_WORDS.findall(question.lower())
+    # Joining neighboring words accommodates report IDs such as COCA_COLA and
+    # questions spelling the same name as CocaCola, without matching 3M to X3M.
+    mentioned_names = {
+        "".join(question_words[start:end])
+        for start in range(len(question_words))
+        for end in range(start + 1, min(start + 6, len(question_words)) + 1)
+    }
+    documents = {record.entry.text.partition("\n")[0] for record in records}
+    selected = set()
+    for document in documents:
+        # Reporting periods and suffixes are not part of the company name.
+        # Keep alphanumeric company tokens such as 3M intact.
+        company_part = _REPORT_YEAR.split(document, maxsplit=1)[0]
+        company = "".join(
+            word
+            for word in _IDENTITY_WORDS.findall(company_part.lower())
+            if word not in _REPORT_SUFFIXES and not word.isdigit()
+        )
+        if len(company) > 1 and company not in _STOPWORDS and company in mentioned_names:
+            selected.add(document)
+    if not selected:
+        return records
+    years = set(_REPORT_YEAR.findall(question))
+    matching_years = {document for document in selected if years.intersection(_REPORT_YEAR.findall(document))}
+    if matching_years:
+        selected = matching_years
+    return [record for record in records if record.entry.text.partition("\n")[0] in selected]
 
 
 def _rank_pages(
@@ -361,6 +448,8 @@ def _rank_pages(
             for vocabulary, heading in _STATEMENT_HEADINGS
             if heading.search(bodies[index][:1000])
         )
+        if _GEOGRAPHY_TERMS & terms.keys() and _BUSINESS_HEADING.search(bodies[index]):
+            score += 3.0 * sum(terms[term] * idf[term] for term in _GEOGRAPHY_TERMS & terms.keys())
         document_tokens = set(_tokens(record.entry.text.partition("\n")[0])) - {"10", "k", "q", "form", "report"}
         company = {term for term in document_tokens if not term.isdigit() and terms.get(term) == 1.0}
         if company:

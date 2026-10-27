@@ -20,6 +20,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 
@@ -33,8 +34,13 @@ from powercontext.builtin.runtime import (
     open_builtin_runtime,
 )
 from powercontext.builtin.scope import ScopeDraft
-from powercontext.sources import SourceObservation
-from powercontext.sources.pdf_pages import PDFPageInput, search_pdf_pages
+from powercontext.sources import (
+    SourceDefinitionRegistry,
+    SourceObservation,
+    manifest_for_definition,
+    project_source_for_transport,
+)
+from powercontext.sources.pdf_pages import PDF_PAGE_SOURCE_DEFINITION, PDFPageInput, search_pdf_pages
 from powercontext.sources.projections import TEXT_EVIDENCE_PROJECTION_KEY
 
 _CAPTURE = """
@@ -189,3 +195,109 @@ def test_pdf_evidence_survives_capture_process_and_runtime_restart(tmp_path: Pat
             assert restored.citation == citations[0]
 
     asyncio.run(retrieve())
+
+
+async def _capture_pages(config: BuiltinConfig, pages: list[tuple[str, str]]) -> str:
+    from powercontext.builtin.runtime import SubmitSourceObservation
+
+    registry = SourceDefinitionRegistry((PDF_PAGE_SOURCE_DEFINITION,))
+    async with open_builtin_runtime(config, candidate_pipeline=_PagePipeline()) as runtime:
+        assert runtime.scopes is not None
+        scope = await runtime.scopes.create(ScopeDraft(title="Mixed reports", summary="PDFs", idempotency_key="mixed"))
+        await runtime.ingestion.register(manifest_for_definition(PDF_PAGE_SOURCE_DEFINITION))
+        for index, (document, text) in enumerate(pages, 1):
+            page = PDFPageInput(document_id=document, document_sha256="a" * 64, page_number=index, text=text)
+            observation = project_source_for_transport(registry, await registry.resolve(page))
+            await runtime.ingestion.submit(SubmitSourceObservation(scope_id=scope.scope_id, observation=observation))
+        memory = runtime.memory.for_scope(scope.scope_id)
+        for _ in range(len(pages) + 1):
+            if not (await memory.flush()).processed:
+                break
+        else:
+            raise AssertionError("PDF ingestion did not drain")  # noqa: TRY003
+        return scope.scope_id
+
+
+def test_explicit_company_and_report_year_exclude_other_report_distractors(tmp_path: Path) -> None:
+    config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'mixed.db'}"))
+    pages = [
+        ("NORTH_STAR_2025_10K", "Consolidated Statement of Income\n2025 Revenue 100 Cost of sales 60 Gross profit 40"),
+        (
+            "NORTH_STAR_2024_10K",
+            "Consolidated Statement of Income\n2024 Revenue 900 Cost of sales 300 Gross profit 600",
+        ),
+        ("RIVAL_2025_10K", "Gross margin North Star gross profit revenue cost of sales 2025 " * 30),
+    ]
+
+    async def run() -> None:
+        scope_id = await _capture_pages(config, pages)
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope_id)
+            citations = await search_pdf_pages(memory, "What is North Star's FY2025 gross margin?", limit=20)
+            assert citations
+            texts = [(await memory.get(GetMemoryEntryRequest(citation=citation))).entry.text for citation in citations]
+            assert all(text.startswith("NORTH_STAR_2025_10K\n") for text in texts)
+            compared = await search_pdf_pages(memory, "Compare North Star's 2025 and 2024 gross margin", limit=20)
+            comparison = [
+                (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.text for citation in compared
+            ]
+            assert {text.split("\n", 1)[0] for text in comparison} == {"NORTH_STAR_2025_10K", "NORTH_STAR_2024_10K"}
+            both = await search_pdf_pages(memory, "Compare North Star and Rival gross margin for 2025", limit=20)
+            companies = [(await memory.get(GetMemoryEntryRequest(citation=citation))).entry.text for citation in both]
+            assert {text.split("\n", 1)[0] for text in companies} == {"NORTH_STAR_2025_10K", "RIVAL_2025_10K"}
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    "preamble",
+    ["", "Forward-looking statements about future performance.\n" * 40],
+    ids=["early-heading", "late-heading"],
+)
+def test_business_overview_with_region_names_can_answer_geography_question(tmp_path: Path, preamble: str) -> None:
+    config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'regions.db'}"))
+    pages = [
+        ("NORTH_STAR_2025_10K", preamble + "Our Business\nWe distribute instruments throughout EMEA and APAC."),
+        ("NORTH_STAR_2025_10K", "Market risk: currency fluctuations affect international operations."),
+        ("RIVAL_2025_10K", "Geographies: North America, Europe, Australia."),
+    ]
+
+    async def run() -> None:
+        scope_id = await _capture_pages(config, pages)
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope_id)
+            citations = await search_pdf_pages(memory, "What geographies does North Star operate in?", limit=1)
+            assert citations
+            text = (await memory.get(GetMemoryEntryRequest(citation=citations[0]))).entry.text
+            assert "EMEA and APAC" in text
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize(
+    ("document", "company"),
+    [("3M_2025_10K", "3M"), ("COCA_COLA_2025_10K", "CocaCola"), ("ACME_INC_2025_10K", "Acme")],
+)
+def test_report_identity_matching_and_fallback_keep_relevant_pages(tmp_path: Path, document: str, company: str) -> None:
+    config = BuiltinConfig(database=SQLiteConfig(url=f"sqlite+aiosqlite:///{tmp_path / 'identities.db'}"))
+    statement = "Consolidated Statement of Income\n2025 Revenue 100 Net income 20"
+    pages = [(document, statement), ("X3M_2025_10K", statement)]
+
+    async def run() -> None:
+        scope_id = await _capture_pages(config, pages)
+        async with open_builtin_runtime(config) as runtime:
+            memory = runtime.memory.for_scope(scope_id)
+            # No matching 2024 report exists; the company must still be searchable.
+            citations = await search_pdf_pages(memory, f"What was {company}'s revenue in 2024?", limit=20)
+            assert citations
+            texts = [(await memory.get(GetMemoryEntryRequest(citation=citation))).entry.text for citation in citations]
+            assert all(text.startswith(document + "\n") for text in texts)
+            # With no document identity in the question, search the entire scope.
+            general = await search_pdf_pages(memory, "What is the reported revenue?", limit=20)
+            identities = {
+                (await memory.get(GetMemoryEntryRequest(citation=citation))).entry.text.split("\n", 1)[0]
+                for citation in general
+            }
+            assert identities == {document, "X3M_2025_10K"}
+
+    asyncio.run(run())
