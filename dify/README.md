@@ -74,13 +74,15 @@ dify/
 | --- | --- |
 | Dify | **1.9.2**（`CURRENT_DSL_VERSION = 0.4.0`，与 DSL 完全匹配）。在 1.17.1（DSL 0.7.0）导入会提示「版本较旧」，属预期，功能不受影响 |
 | DSL | `version: 0.4.0`，`mode: advanced-chat`，`dependencies: []`（无插件依赖） |
-| PowerContext | **1.2.0**（PyPI：`powercontext[server]`），SQLite + FTS5 持久化，无需 Embedding / Rerank |
+| PowerContext | **1.2.0**（PyPI：`powercontext[server,cli]`；`cli` 提供 `powercontext` 命令所需的 typer，只跑随附脚本则可省），SQLite + FTS5 持久化，无需 Embedding / Rerank |
 | Python | 3.11+（PowerContext 与随附脚本；3.13.5 实测） |
 | 模型 | 任意 OpenAI 兼容 chat 模型；DSL 默认 `langgenius/openai/openai` + `gpt-4o-mini`，导入后按第 5.3 步改成你账号下可用的模型 |
 | 网络 | Dify 需要能访问 PowerContext 的 8000 端口；两个 LLM 节点需要能访问你配置的模型服务。无其他外网依赖 |
 | 资源 | 2 vCPU / 2 GB 内存足够跑 Dify + PowerContext（PowerContext 空载常驻约 100 MB） |
 
 不使用的组件：自定义插件、额外后端、知识库、Embedding、Rerank。
+
+DSL 与仓库里不含任何 API Key、密码或真实凭据：模型 key 由评审在自己的 Dify 工作区配置，PowerContext 地址只以环境变量 `pc_base_url` 出现（默认 `http://127.0.0.1:8000`，属占位值）。
 
 ## 5. 启动步骤
 
@@ -91,20 +93,22 @@ dify/
 ```powershell
 # Windows
 python -m venv .venv-pc
-.venv-pc\Scripts\python.exe -m pip install "powercontext[server]==1.2.0"
+.venv-pc\Scripts\python.exe -m pip install "powercontext[server,cli]==1.2.0"
 .venv-pc\Scripts\powercontext.exe server run --host 127.0.0.1 --port 8000 --no-env-file
 ```
 
 ```bash
 # macOS / Linux
 python -m venv .venv-pc
-.venv-pc/bin/pip install "powercontext[server]==1.2.0"
+.venv-pc/bin/pip install "powercontext[server,cli]==1.2.0"
 .venv-pc/bin/powercontext server run --host 127.0.0.1 --port 8000 --no-env-file
 ```
 
+> 必须带 `cli` extra：`powercontext` 命令的入口在导入时就需要 `typer`，只装 `[server]` 会在启动时报 `ModuleNotFoundError: typer`（只跑方式 B 的脚本则不需要）。
+
 > `--no-env-file` 表示不读取当前目录的 `.env`，避免环境里已有配置干扰；国内网络下载慢时可给 pip 加 `-i https://pypi.tuna.tsinghua.edu.cn/simple`。
 
-方式 B：使用本目录脚本（已安装 PowerContext，或就在 PowerContext 仓库里跑）
+方式 B：使用本目录脚本（已装好 PowerContext 的 `server` 依赖，或就在 PowerContext 仓库里以 `pip install -e ".[server]"` 装过依赖）
 
 ```powershell
 .venv\Scripts\python.exe dify\scripts\run_powercontext.py --port 8000
@@ -176,7 +180,7 @@ Dify → 工作室 → 创建/导入 → **导入 DSL 文件** → 选择 `dify/
 
 - 五步体验脚本：[`samples/verification.md`](samples/verification.md)（含初始状态、每步输入、预期表现、重置方法）
 - 运行证据与复现命令：[`evidence/README.md`](evidence/README.md)
-- 静态校验：`python dify/scripts/validate_dsl.py dify/dsl/grudge-inn.chatflow.yml` → `OK: 0 errors`
+- 静态校验：`python dify/scripts/validate_dsl.py dify/dsl/grudge-inn.chatflow.yml` → `OK: 0 errors`（该脚本额外需要 PyYAML：`python -m pip install pyyaml`；其余脚本只用标准库）
 
 无 Dify 环境时也可以验证记忆链路：
 
