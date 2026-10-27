@@ -174,16 +174,17 @@ cd qoder
 
 真实输出会随作答内容变化；行数、上下文字节数以本机实际为准。空库首次运行时 `context/prepare` 还没有记忆可拼，上下文字节数为 0、`active=1`（脚本写入的第一条），第二轮起上下文就会带上上一轮的薄弱点。
 
-### 6.4 界面截图（WSL seekdb 主通道实测）
+### 6.4 界面截图与演示录屏（WSL seekdb 主通道实测）
 
 | 截图 | 说明 |
 | --- | --- |
-| [`docs/screenshots/01-home.png`](docs/screenshots/01-home.png) | 首页：4 门课程 9 段资料、复习会话入口、PowerContext 记忆面板与 seekdb 执行记录 |
+| [`docs/screenshots/01-home.png`](docs/screenshots/01-home.png) | 首页：3 门课程 9 段资料、复习入口、PowerContext 记忆面板与 seekdb 执行记录 |
 | [`docs/screenshots/02-session.png`](docs/screenshots/02-session.png) | 开始一轮复习：卡片由混合检索召回，顶部显示本轮 PowerContext 上下文 |
-| [`docs/screenshots/03-graded.png`](docs/screenshots/03-graded.png) | 作答后：正确答案、掌握度、seekdb 相关原文回显、已写入 PowerContext 的薄弱点文本 |
-| [`docs/screenshots/04-memory.png`](docs/screenshots/04-memory.png) | 记忆面板：薄弱点/偏好可「修正」「失效」，右侧可见真实 SQL 与记忆读写记录 |
+| [`docs/screenshots/03-graded.png`](docs/screenshots/03-graded.png) | 作答后：所选错误项、正确答案、掌握度、seekdb 相关原文回显、已写入 PowerContext 的薄弱点文本 |
+| [`docs/screenshots/04-memory.png`](docs/screenshots/04-memory.png) | 记忆面板与「PowerContext 读写」：条目可「修正」「失效」，右侧是真实请求/响应记录 |
 
-截图由 CDP 驱动无头 Edge 在 1500×1150 视口下抓取，页面与数据都来自同一套 `app/` 代码。
+[`site/assets/demo.mp4`](site/assets/demo.mp4)（13 秒，另有 [`demo.gif`](site/assets/demo.gif)）是同一套页面上的完整操作录屏：载入首页 → 开始一轮复习 → 答错并看到薄弱点写入 → 切到 PowerContext 读写记录。截图与录屏都由 CDP 驱动无头 Edge 在 1500×1150 视口下抓取，页面与数据来自同一套 `app/` 代码。
+
 
 ### 6.5 离线单元测试（不依赖 seekdb / 网络 / PowerContext）
 

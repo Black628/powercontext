@@ -1,0 +1,355 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>知新 / Recall Coach —— 记忆驱动的个人复习教练</title>
+    <meta
+      name="description"
+      content="知新是个人学习复习教练：seekdb 负责资料向量+全文混合检索，PowerContext 负责薄弱点与偏好记忆，下一轮复习自动带上上一轮的错误。"
+    />
+    <style>
+      :root {
+        --paper: #f6f4ee;
+        --card: #fffdf8;
+        --ink: #1d2321;
+        --muted: #6b7370;
+        --line: #e2ded2;
+        --accent: #0f6f5c;
+        --accent-soft: #e2f0ea;
+        --warn: #b3541e;
+        --warn-soft: #fbe9dc;
+        --seekdb: #2f5f9e;
+        --seekdb-soft: #e4ecf8;
+        --pc: #6a4b9e;
+        --pc-soft: #ece6f7;
+        --radius: 14px;
+        --shadow: 0 1px 2px rgba(29, 35, 33, 0.06), 0 8px 24px rgba(29, 35, 33, 0.05);
+        --mono: ui-monospace, "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background:
+          radial-gradient(1100px 500px at 12% -8%, #eef5f0 0%, transparent 60%),
+          radial-gradient(900px 420px at 96% 4%, #f7efe4 0%, transparent 55%),
+          var(--paper);
+        color: var(--ink);
+        font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+        font-size: 16px;
+        line-height: 1.65;
+      }
+      a { color: var(--accent); }
+      .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+      header.nav {
+        position: sticky; top: 0; z-index: 10;
+        background: rgba(246, 244, 238, 0.86);
+        backdrop-filter: blur(10px);
+        border-bottom: 1px solid var(--line);
+      }
+      .nav-inner { display: flex; align-items: center; gap: 18px; height: 60px; }
+      .brand { font-weight: 700; letter-spacing: 0.02em; font-size: 18px; }
+      .brand span { color: var(--accent); }
+      .nav-links { margin-left: auto; display: flex; gap: 18px; font-size: 14px; }
+      .nav-links a { color: var(--muted); text-decoration: none; }
+      .nav-links a:hover { color: var(--ink); }
+      .hero { padding: 72px 0 40px; }
+      .eyebrow { font-size: 13px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--muted); }
+      h1 { font-size: clamp(34px, 5vw, 52px); line-height: 1.12; margin: 14px 0 18px; letter-spacing: -0.01em; }
+      h1 em { font-style: normal; color: var(--accent); }
+      .lede { font-size: 18px; color: #3d4643; max-width: 760px; }
+      .badges { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 26px; }
+      .chip {
+        font-size: 13px; padding: 5px 11px; border-radius: 999px;
+        border: 1px solid var(--line); background: var(--card); color: #4a524f;
+      }
+      .chip.seekdb { background: var(--seekdb-soft); color: var(--seekdb); border-color: transparent; }
+      .chip.pc { background: var(--pc-soft); color: var(--pc); border-color: transparent; }
+      .chip.accent { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
+      .cta { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+      .btn {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 11px 20px; border-radius: 10px; text-decoration: none; font-weight: 600; font-size: 15px;
+        background: var(--accent); color: #fff; border: 1px solid transparent;
+        box-shadow: var(--shadow);
+      }
+      .btn.secondary { background: var(--card); color: var(--ink); border-color: var(--line); box-shadow: none; }
+      .btn small { font-weight: 400; opacity: 0.85; }
+      section { padding: 56px 0; }
+      section h2 { font-size: 28px; margin: 0 0 8px; letter-spacing: -0.01em; }
+      section .sub { color: var(--muted); margin: 0 0 28px; }
+      .grid { display: grid; gap: 16px; }
+      .grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .card {
+        background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+        padding: 22px; box-shadow: var(--shadow);
+      }
+      .card h3 { margin: 0 0 8px; font-size: 17px; }
+      .card p { margin: 0; color: #4a524f; }
+      .num { font-family: var(--mono); font-size: 13px; color: var(--accent); letter-spacing: 0.12em; }
+      ol.flow { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; counter-reset: step; }
+      ol.flow li {
+        counter-increment: step; position: relative; padding: 16px 18px 16px 62px;
+        background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+      }
+      ol.flow li::before {
+        content: counter(step); position: absolute; left: 18px; top: 15px;
+        width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center;
+        background: var(--ink); color: #fff; font-size: 14px; font-weight: 600;
+      }
+      ol.flow b { display: block; }
+      ol.flow span { color: #4a524f; font-size: 15px; }
+      .tag { font-size: 12px; padding: 2px 8px; border-radius: 999px; font-weight: 600; }
+      .tag.seekdb { background: var(--seekdb-soft); color: var(--seekdb); }
+      .tag.pc { background: var(--pc-soft); color: var(--pc); }
+      table { width: 100%; border-collapse: collapse; background: var(--card); border-radius: 12px; overflow: hidden; }
+      th, td { text-align: left; padding: 14px 16px; border-bottom: 1px solid var(--line); vertical-align: top; font-size: 15px; }
+      th { font-size: 13px; letter-spacing: 0.06em; color: var(--muted); text-transform: uppercase; background: #fbf9f3; }
+      tr:last-child td { border-bottom: none; }
+      code, pre { font-family: var(--mono); }
+      pre {
+        background: #1f2523; color: #e8ece8; padding: 18px 20px; border-radius: 12px;
+        overflow-x: auto; font-size: 13.5px; line-height: 1.7;
+      }
+      pre .c { color: #93a39d; }
+      .shots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+      figure { margin: 0; background: var(--card); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); }
+      figure img { width: 100%; display: block; }
+      figcaption { padding: 12px 16px; font-size: 14px; color: #4a524f; border-top: 1px solid var(--line); }
+      .video-wrap { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px; box-shadow: var(--shadow); }
+      .video-wrap video { width: 100%; display: block; border-radius: 8px; background: #000; }
+      .metric { display: flex; flex-direction: column; gap: 4px; }
+      .metric strong { font-size: 30px; letter-spacing: -0.01em; }
+      .metric span { color: var(--muted); font-size: 14px; }
+      .evidence { font-family: var(--mono); font-size: 12.5px; background: #f3f1ea; border: 1px dashed var(--line); border-radius: 10px; padding: 14px 16px; color: #4a524f; overflow-x: auto; }
+      .note { font-size: 14px; color: var(--muted); }
+      .usage { border-left: 4px solid var(--warn); background: var(--warn-soft); }
+      footer { border-top: 1px solid var(--line); padding: 32px 0 56px; color: var(--muted); font-size: 14px; }
+      .footer-inner { display: flex; flex-wrap: wrap; gap: 18px; justify-content: space-between; }
+      @media (max-width: 900px) {
+        .grid.three, .grid.two, .shots { grid-template-columns: 1fr; }
+        .nav-links { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <div class="brand">知新 <span>Recall Coach</span></div>
+        <nav class="nav-links">
+          <a href="#why">问题</a>
+          <a href="#flow">怎么运行</a>
+          <a href="#tech">技术分工</a>
+          <a href="#demo">演示</a>
+          <a href="#verify">验证</a>
+          <a href="#run">运行方式</a>
+        </nav>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section class="hero" id="top">
+        <div class="eyebrow">Qoder × OceanBase · 学习提效</div>
+        <h1>一个会记住你<em>哪里没学会</em>的复习教练</h1>
+        <p class="lede">
+          知新把课程笔记、论文摘要存进 seekdb，用向量 + 全文混合检索决定「复习什么」；
+          再把每次答错的概念写进 PowerContext，决定下一轮「先问你什么、怎么讲」。
+          检索与记忆各司其职，越用越懂你。
+        </p>
+        <div class="badges">
+          <span class="chip seekdb">seekdb embedded · 向量 + 全文混合检索</span>
+          <span class="chip pc">PowerContext embedded · 记忆与上下文</span>
+          <span class="chip accent">零 API Key 可完整运行</span>
+          <span class="chip">pytest 29 例离线检查</span>
+        </div>
+        <div class="cta">
+          <a class="btn" href="#run">本地一键运行</a>
+          <a class="btn secondary" href="{{REPO_URL}}">代码仓库 <small>（fork 后替换链接）</small></a>
+        </div>
+      </section>
+
+      <section id="why">
+        <h2>它解决什么</h2>
+        <p class="sub">学习里最耗时的不是「再看一遍」，而是不知道「该看哪一段、上次错在哪」。</p>
+        <div class="grid three">
+          <div class="card">
+            <div class="num">01</div>
+            <h3>资料散，找不到出处</h3>
+            <p>几十篇笔记与论文，复习时只记得「好像在哪看过」。知新把资料切成段存入 seekdb，用语义 + 关键词双通道找回原文，并显示命中出处。</p>
+          </div>
+          <div class="card">
+            <div class="num">02</div>
+            <h3>错过的还会再错</h3>
+            <p>同一个概念第三次答错，但没人提醒你。知新把薄弱点写进 PowerContext，下一轮优先出、优先讲，并在顶部显示「已注入的记忆」。</p>
+          </div>
+          <div class="card">
+            <div class="num">03</div>
+            <h3>工具不懂你的偏好</h3>
+            <p>有人要先看定义，有人要先看反例。偏好写进记忆后每轮生效；也可以随时在记忆面板「修正」「失效」，不必重启重来。</p>
+          </div>
+        </div>
+      </section>
+
+      <section id="flow">
+        <h2>一轮复习发生什么</h2>
+        <p class="sub">检索决定复习范围，记忆决定顺序与提示；作答结果再写回记忆，闭环成立。</p>
+        <ol class="flow">
+          <li>
+            <b>导入资料 <span class="tag seekdb">seekdb</span></b>
+            <span>笔记按 420 字切段，写入 <code>coach_materials</code>（向量列 + 全文列 + HNSW / ngram 索引）。</span>
+          </li>
+          <li>
+            <b>组装本轮上下文 <span class="tag pc">PowerContext</span></b>
+            <span><code>context/prepare</code> 把偏好与薄弱点拼成本轮上下文，界面显示注入的字节数。</span>
+          </li>
+          <li>
+            <b>混合检索选卡 <span class="tag seekdb">seekdb</span></b>
+            <span>同一句 SQL 的两个分支：<code>l2_distance ... APPROXIMATE</code> 走向量，<code>MATCH ... AGAINST</code> 走全文，RRF 融合后排出本轮卡片。</span>
+          </li>
+          <li>
+            <b>作答与判题</b>
+            <span>从笔记里挖空、给出四个选项；判定后在原文里回显命中片段，让学习者立刻回看证据。</span>
+          </li>
+          <li>
+            <b>写回记忆 <span class="tag pc">PowerContext</span></b>
+            <span>答错时把「课程 / 概念 / 第几次仍然答错」写入记忆；同一段笔记的旧薄弱点先失效再写新条目，避免越积越多。</span>
+          </li>
+        </ol>
+      </section>
+
+      <section id="tech">
+        <h2>技术分工</h2>
+        <p class="sub">两者不互相替代：检索结果只有作答后才可能变成记忆，记忆只影响下一轮检索与提示。</p>
+        <table>
+          <thead>
+            <tr><th>技术</th><th>在项目里做什么</th><th>怎么核对</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span class="chip seekdb">seekdb</span><br /><span class="note">嵌入式（pylibseekdb）</span></td>
+              <td>唯一的资料存储与检索：建表、HNSW 向量索引、ngram 全文索引、混合检索、掌握度与复习次数回写。</td>
+              <td>界面右栏「seekdb 执行记录」逐条显示真实 SQL、行数、耗时；<code>/api/evidence</code> 可导出。</td>
+            </tr>
+            <tr>
+              <td><span class="chip pc">PowerContext</span><br /><span class="note">嵌入式 Server（HTTP API）</span></td>
+              <td>学习者记忆：写薄弱点/偏好/进度，召回并组装上下文；修正与失效走 <code>atomic-memory/lifecycle</code>。</td>
+              <td>界面右栏「PowerContext 读写」显示每次请求/响应；记忆面板显示条目状态与版本。</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="demo">
+        <h2>演示</h2>
+        <p class="sub">录屏来自真实运行的服务：先看首页与资料库，再开始一轮复习、答错、记忆面板刷新。</p>
+        <div class="video-wrap">
+          <video controls preload="metadata" poster="assets/01-home.png">
+            <source src="assets/demo.mp4" type="video/mp4" />
+            <source src="assets/demo.gif" type="image/gif" />
+            你的浏览器不支持内嵌视频，可直接打开 <a href="assets/demo.mp4">demo.mp4</a>。
+          </video>
+        </div>
+        <div class="shots" style="margin-top: 18px">
+          <figure>
+            <img src="assets/01-home.png" alt="首页：资料库与记忆面板" />
+            <figcaption>首页：3 门课程 9 段资料；右侧是本轮记忆与 seekdb 执行记录。</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/02-session.png" alt="开始一轮复习" />
+            <figcaption>开始复习：卡片由混合检索召回，顶部显示 PowerContext 本轮注入。</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/03-graded.png" alt="作答后写回薄弱点" />
+            <figcaption>答错后：正确答案、掌握度、相关原文回显，以及刚写入记忆的薄弱点文本。</figcaption>
+          </figure>
+          <figure>
+            <img src="assets/04-memory.png" alt="记忆面板与读写记录" />
+            <figcaption>记忆面板：薄弱点可修正/失效；「PowerContext 读写」显示真实调用。</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section id="verify">
+        <h2>可复核的验证结果</h2>
+        <p class="sub">同一套代码在两套环境跑同一份验证脚本，数字取自真实运行。</p>
+        <div class="grid three">
+          <div class="card metric"><strong>11/11</strong><span>WSL + 嵌入式 seekdb + 嵌入式 PowerContext：`scripts/smoke.py` 全部通过</span></div>
+          <div class="card metric"><strong>11/11</strong><span>Windows 镜像后端（SQLite）冷启动复测，同样全部通过</span></div>
+          <div class="card metric"><strong>29 passed</strong><span>离线单元测试（pytest），不依赖 seekdb / 网络 / PowerContext</span></div>
+        </div>
+        <div class="evidence" style="margin-top: 18px">
+$ python scripts/smoke.py --base-url http://127.0.0.1:8848
+=== 后端：seekdb / embedded｜embedding builtin-hash-1024｜记忆 在线
+[PASS] 载入样例资料 | materials=9 reviews≥10
+[PASS] seekdb 混合检索有结果 | hit0=进程与线程
+[PASS] 记忆快照可读 | active=5 preference=True
+--- 记忆写入：《操作系统》死锁的四个必要条件：概念「不可剥夺」还没记牢（复习第 6 次仍然答错）。
+[PASS] PowerContext 读取记录可核对 | rows=10
+=== 11/11 步通过
+        </div>
+        <p class="note" style="margin-top: 10px">验证步骤、手动核对方式与 Windows 降级路径见仓库 <code>qoder/docs/verification-sample.md</code>。</p>
+      </section>
+
+      <section id="run">
+        <h2>运行方式</h2>
+        <p class="sub">主通道 Linux / macOS / WSL；Windows 自动降级为 SQLite 镜像后端，界面与流程一致。</p>
+        <pre><code><span class="c"># 1) 依赖（主通道）</span>
+python3 -m venv .venv &amp;&amp; source .venv/bin/activate
+pip install -r qoder/requirements.txt
+
+<span class="c"># 2) 启动（嵌入式 seekdb + 嵌入式 PowerContext，无需外部服务）</span>
+qoder/scripts/start.sh            <span class="c"># 打开 http://127.0.0.1:8848</span>
+
+<span class="c"># 3) 一键验证（11 个检查点）</span>
+python qoder/scripts/smoke.py --base-url http://127.0.0.1:8848
+
+<span class="c"># 4) 离线单元测试</span>
+pip install -r qoder/requirements-dev.txt &amp;&amp; cd qoder &amp;&amp; pytest -q tests</code></pre>
+        <p class="note">
+          Windows：<code>qoder\scripts\start.ps1</code>。没有 API Key 也能完整运行；配置 OpenAI 兼容的 embedding / LLM 才会启用语义向量与 LLM 讲评。
+          配置项与接口见仓库 <code>README.md</code> 第 7、8 节。
+        </p>
+      </section>
+
+      <section id="usage">
+        <h2>使用效果</h2>
+        <div class="card usage">
+          <p>
+            <strong>待填写：</strong>在这里放真实使用数据（使用人数、复习轮次、持续天数、提效对比、脱敏后的用户反馈），
+            并附访问统计截图、使用日志或问卷导出。没有数据时请删除本节。
+          </p>
+        </div>
+      </section>
+
+      <section id="opensource">
+        <h2>开源与复用</h2>
+        <div class="grid two">
+          <div class="card">
+            <h3>用到的开源项目</h3>
+            <p>
+              <a href="https://github.com/oceanbase/powercontext">PowerContext</a>（Apache-2.0）提供记忆与上下文服务；
+              OceanBase seekdb（Apache-2.0）与 <code>pyobvector</code> 提供嵌入式向量/全文检索。
+              本项目在它们之上实现学习教练业务，未修改上游代码。
+            </p>
+          </div>
+          <div class="card">
+            <h3>数据与隐私</h3>
+            <p>
+              所有资料与记忆默认只落在本机 <code>COACH_DATA_DIR</code>；仓库不包含任何 API Key、账号或用户数据。
+              示例资料为项目自编的学习笔记。
+            </p>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="wrap footer-inner">
+        <div>知新 / Recall Coach · Qoder × OceanBase 参赛作品</div>
+        <div>seekdb 混合检索 · PowerContext 记忆 · Qoder 开发</div>
+      </div>
+    </footer>
+  </body>
+</html>

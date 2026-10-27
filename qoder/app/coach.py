@@ -370,6 +370,7 @@ class Coach:
             "session_id": session.id,
             "material_id": material_id,
             "verdict": verdict,
+            "picked": picked,
             "answer": card["answer"],
             "question": card["question"],
             "related": card.get("related") or [],
