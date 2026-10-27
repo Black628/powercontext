@@ -858,38 +858,47 @@ class ScopedContextApplication:
         authorize_scopes: Callable[[tuple[str, ...]], Awaitable[None]] | None = None,
         atomic_context: ArtifactSearchExecutionContext | None = None,
     ) -> ContextPack | ContextPackDelta:
-        # 1. 调用现有的 prepare 获取本轮目标内容
+        import json
+        from dataclasses import asdict, is_dataclass
+        
+        # 1. 调用普通的 prepare
         prepared_context = await self.prepare(
             request,
             authorize_scopes=authorize_scopes,
             atomic_context=atomic_context
         )
         
-        # 2. 尝试从 prepared_context 中提取纯正文（更健壮的写法）
+        # 2. 提取正文
         content_str = ""
+        
+        # 处理空结果
         if getattr(prepared_context, "status", "") == "empty" or getattr(prepared_context, "content_bytes", 1) == 0:
             content_str = ""
         else:
-            if hasattr(prepared_context, "content") and isinstance(prepared_context.content, str):
-                content_str = prepared_context.content
-            elif hasattr(prepared_context, "text") and isinstance(prepared_context.text, str):
-                content_str = prepared_context.text
-            elif hasattr(prepared_context, "sections"):
-                content_str = "".join([sec.content for sec in prepared_context.sections if hasattr(sec, "content")])
-            else:
-                try:
+            try:
+                # 如果是 Pydantic 模型（最常见）
+                if hasattr(prepared_context, "model_dump_json"):
                     content_str = prepared_context.model_dump_json()
-                except AttributeError:
+                # 如果是 dataclass
+                elif is_dataclass(prepared_context):
+                    content_str = json.dumps(asdict(prepared_context), default=str, sort_keys=True)
+                # 如果有 dict 方法
+                elif hasattr(prepared_context, "dict"):
+                    content_str = json.dumps(prepared_context.dict(), default=str, sort_keys=True)
+                # 兜底
+                else:
                     content_str = str(prepared_context)
+            except Exception as e:
+                # 就算序列化失败，也要用字符串兜底，保证代码不崩
+                content_str = str(prepared_context)
 
-        # 3. 构造目标 Pack
+        # 3. 生成 target pack
         target_pack = ContextPack.from_content(content_str)
         
-        # 4. 如果没给 base_pack，说明是首轮，返回完整 Pack
+        # 4. 返回首轮或增量
         if base_pack is None:
             return target_pack
             
-        # 5. 如果有 base_pack，生成并返回 Delta
         return ContextPackDelta.between(base_pack, target_pack)
     
     async def _prepare(self, request: PrepareContextRequest, scope: ScopeDescriptor, /) -> PreparedContext:

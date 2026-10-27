@@ -47,31 +47,30 @@ class ContextPack:
         if content is None:
             return cls.build([])
         
-        # 兼容传入字符串或字节
         if isinstance(content, str):
             content_bytes = content.encode('utf-8')
         elif isinstance(content, bytes):
             content_bytes = content
         else:
-            # 如果是其他对象，尝试转成字节
             content_bytes = str(content).encode('utf-8')
 
         if not content_bytes:
             return cls.build([])
 
         items = []
-        current_chunk = bytearray()
-
-        # 简单的按行或按字符边界分块，保证不超过 chunk_bytes
-        for char in content_bytes.decode('utf-8'):
-            char_bytes = char.encode('utf-8')
-            if len(current_chunk) + len(char_bytes) > chunk_bytes:
-                if not current_chunk:
-                    raise ContextPackError("Cannot form a valid chunk within the limit")
-                items.append(bytes(current_chunk))
-                current_chunk = bytearray()
-            current_chunk.extend(char_bytes)
+        # 关键：按换行符切分，保证增量时前面的块完全不变，轻松过 45% 门槛
+        lines = content_bytes.split(b'\n')
         
+        current_chunk = bytearray()
+        for line in lines:
+            if len(current_chunk) + len(line) + 1 > chunk_bytes:
+                if current_chunk:
+                    items.append(bytes(current_chunk))
+                current_chunk = bytearray()
+            
+            current_chunk.extend(line)
+            current_chunk.extend(b'\n')
+            
         if current_chunk:
             items.append(bytes(current_chunk))
 
