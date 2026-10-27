@@ -60,7 +60,7 @@ py -3.12 -m venv .venv                      # 或复用已有虚拟环境
 .venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8848
 ```
 
-打开 <http://127.0.0.1:8848>，首次打开会自动载入示例资料。此时检索后端为 `sqlite-mirror`（没有 seekdb 运行时），但 `powercontext[server,client]` 在 Windows 上同样可用，记忆为「在线」，完整 11 步验证也能跑通；只有主动不装 `powercontext` 时才降级为「记忆离线」（7 步通过 + 3 步跳过）。
+打开 <http://127.0.0.1:8848>，点击左栏「载入示例」写入 9 段示例资料。此时检索后端为 `sqlite-mirror`（没有 seekdb 运行时），但 `powercontext[server,client]` 在 Windows 上同样可用，记忆为「在线」，完整 11 步验证也能跑通；只有主动不装 `powercontext` 时才降级为「记忆离线」（7 步通过 + 3 步跳过）。
 
 ### 5.2 Linux / macOS（主通道：seekdb 嵌入式 + PowerContext 嵌入式）
 
@@ -132,7 +132,7 @@ cd qoder
 
 ### 6.2 手工路径（界面）
 
-1. 首页「资料库」确认已有 4 门课程、9 段资料；
+1. 首页点「载入示例」，确认「资料库」出现 4 门课程、9 段资料；
 2. 「开始复习」选择「操作系统」，3 张卡；
 3. 顶部出现「PowerContext 记得的你」（嵌入/外部 PowerContext 下为真实上下文；未安装时为离线提示）；
 4. 第一张卡故意选错 → 出现正确答案、掌握度、seekdb 相关原文；
