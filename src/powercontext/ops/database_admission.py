@@ -70,7 +70,10 @@ def _source_files(database: Path) -> dict[str, tuple[int, ...] | None]:
 
 def _copy(source: Path, destination: Path, expected: tuple[int, ...], deadline: float) -> str:
     checksum = hashlib.sha256()
-    descriptor = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+    try:
+        descriptor = os.open(source, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+    except FileNotFoundError as error:
+        raise OpsError("database_changed_during_admission") from error
     with os.fdopen(descriptor, "rb") as input_file, destination.open("xb") as output:
         if _identity(os.fstat(input_file.fileno())) != expected:
             raise OpsError("database_changed_during_admission")
@@ -195,9 +198,9 @@ def _target_admission(
         raise OpsError("database_admission_unavailable")
     result = cast(dict[str, Any], decoded)
     if (
-        not isinstance(result, dict)
-        or type(result.get("protocol_version")) is not int
+        type(result.get("protocol_version")) is not int
         or result["protocol_version"] != 1
+        or not isinstance(result.get("state"), str)
         or result.get("state") not in {"ready", "rejected"}
         or not isinstance(result.get("reason"), str)
         or (

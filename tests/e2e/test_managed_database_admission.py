@@ -176,6 +176,22 @@ def test_start_restart_and_program_repair_retain_exact_memory_and_configuration(
     asyncio.run(_read(config, original, latest))
 
 
+def test_writes_invalidate_restart_approval_and_stop_then_fresh_start_preserves_them(managed_database):
+    ops, adapter, installer, _summary = managed_database
+    assert ops.handle(_apply_request(_plan(ops, "start"), "initial-start"))["outcome"] == "succeeded"
+    plan = _plan(ops, "restart")
+    config = _runtime(installer)
+    original, latest = asyncio.run(_seed(config))
+    before = list(adapter.events)
+    result = ops.handle(_apply_request(plan, "restart-after-write"))
+    assert result["outcome"] == "rejected" and result["error"]["code"] == "plan_stale"
+    assert adapter.events == before and adapter.manager == ManagerState.ACTIVE
+    assert ops.handle(_apply_request(_plan(ops, "stop"), "stop-writer"))["outcome"] == "succeeded"
+    assert adapter.manager == ManagerState.INACTIVE
+    assert ops.handle(_apply_request(_plan(ops, "start"), "fresh-start"))["outcome"] == "succeeded"
+    asyncio.run(_read(config, original, latest))
+
+
 def test_wal_only_schema_is_admitted_without_touching_source_sidecars(managed_database, tmp_path):
     ops, _adapter, installer, summary = managed_database
     # Start with a fresh managed Server in WAL. Keep the first connection open

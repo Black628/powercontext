@@ -90,8 +90,23 @@ def test_source_change_during_copy_cannot_be_certified(database, monkeypatch):
     assert not result.allowed_to_start and result.reason == "database_changed_during_admission"
 
 
+def test_disappearing_observed_source_requires_a_fresh_admission(database, monkeypatch):
+    original = database_admission._copy
+
+    def disappearing(source, destination, expected, deadline):
+        source.unlink()
+        return original(source, destination, expected, deadline)
+
+    monkeypatch.setattr(database_admission, "_copy", disappearing)
+    result = admit_database(database, version("powercontext"), python_executable=Path(sys.executable))
+    assert not result.allowed_to_start and result.reason == "database_changed_during_admission"
+    assert not database.database_path.exists()
+
+
 @pytest.mark.skipif(os.name != "posix", reason="POSIX failure fixture delegates to the current test interpreter")
-@pytest.mark.parametrize("failure", ["missing", "overflow", "timeout", "descendant_exit", "descendant_timeout"])
+@pytest.mark.parametrize(
+    "failure", ["missing", "malformed", "overflow", "timeout", "descendant_exit", "descendant_timeout"]
+)
 def test_target_failures_and_inherited_output_remain_bounded(database, tmp_path, monkeypatch, failure):
     marker = tmp_path / "descendant.pid"
     statements = []
@@ -103,10 +118,12 @@ def test_target_failures_and_inherited_output_remain_bounded(database, tmp_path,
         )
     if failure == "overflow":
         statements.append("import os; os.write(1, b'x' * 65536)")
+    if failure == "malformed":
+        statements.append("import json; print(json.dumps({'protocol_version': 1, 'state': [], 'reason': 'bad'}))")
     if failure in {"timeout", "descendant_timeout", "overflow"}:
         statements.append("import time; time.sleep(30)")
     else:
-        statements.append("raise SystemExit(1)")
+        statements.append(f"raise SystemExit({0 if failure == 'malformed' else 1})")
     wrapper = tmp_path / "target-python"
     wrapper.write_text(f"#!/bin/sh\nexec {shlex.quote(sys.executable)} -I -B -c {shlex.quote('; '.join(statements))}\n")
     wrapper.chmod(0o700)

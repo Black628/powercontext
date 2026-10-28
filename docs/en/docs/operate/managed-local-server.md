@@ -113,7 +113,7 @@ Admission performs no initialization, migration, restoration, model call, HTTP s
 | Observation | Startup behavior |
 | --- | --- |
 | Database and recovery evidence are absent | `new`; only the approved Server startup may initialize storage. |
-| Existing storage passes the exact target's complete check | `existing_ready` for that explicit admission; normal same-version stop/start/restart is supported. |
+| Existing storage passes the exact target's complete check | `existing_ready` for that explicit admission; same-version startup and restart require unchanged storage through apply. |
 | Unknown schema, empty existing file, older layout, future revision, unsupported profile, or missing target helper | Block startup and preserve storage. |
 | Interrupted maintenance/restore, rollback journal, active maintenance lock, orphan sidecars, unsafe location, or changing source | Block startup and preserve recovery evidence. |
 
@@ -130,6 +130,11 @@ validation has a **120-second** deadline. Oversize, insufficient space, and time
 `database_snapshot_too_large`, `database_snapshot_space_insufficient`, and `database_admission_timeout`. Recovery
 journals are limited to 4 MiB each. Large or busy databases require an operator-controlled maintenance workflow;
 raising a limit does not establish compatibility. Temporary copies are removed after the check.
+
+Normal writes also invalidate approved database evidence. If the running Server keeps writing, or data changes
+between preflight and apply, stop it through Ops, obtain a fresh `start` plan after writes have stopped, and approve
+that plan. A rejected restart leaves the running service unchanged. Admission does not automatically stop writers or
+relax the approved database identity; other processes writing the same database must also be quiescent.
 
 A local macOS arm64 / CPython 3.12.15 measurement with 2,000 public Memory records, 4,000 revisions and a 168.4 MiB
 SQLite main file took 3.78–3.86 seconds per admission across three runs; copying and hashing took 0.074–0.075 seconds.
