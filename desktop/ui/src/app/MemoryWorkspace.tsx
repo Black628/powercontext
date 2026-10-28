@@ -21,6 +21,7 @@ import type {
   ArtifactReference,
   AtomicMemoryRecord,
   MemorySearchHit,
+  MemoryContext,
   WriteOutcome,
 } from "../generated/ipc";
 import { desktopApi } from "../shared/ipc";
@@ -43,6 +44,15 @@ type Props = {
 };
 export const textBytes = (value: string) =>
   new TextEncoder().encode(value).length;
+function WriteTarget({ context }: { context: MemoryContext }) {
+  return (
+    <code>
+      {context.endpoint} · {context.serverId && <>{context.serverId} · </>}
+      {context.scopeId}
+    </code>
+  );
+}
+
 type NoteFormProps = Props & {
   onReadSaved: (
     artifact: ArtifactReference,
@@ -222,11 +232,7 @@ export function NoteForm({
           title={t.failed}
         >
           <p className="small">
-            {t.original}:{" "}
-            <code>
-              {outcome.record.context.endpoint} ·{" "}
-              {outcome.record.context.scopeId}
-            </code>
+            {t.original}: <WriteTarget context={outcome.record.context} />
           </p>
         </ErrorFeedback>
       ) : (
@@ -255,11 +261,7 @@ export function NoteForm({
           >
             {outcome.record.status === "unknown" && (
               <p className="small">
-                {t.original}:{" "}
-                <code>
-                  {outcome.record.context.endpoint} ·{" "}
-                  {outcome.record.context.scopeId}
-                </code>
+                {t.original}: <WriteTarget context={outcome.record.context} />
               </p>
             )}
           </PageFeedback>
@@ -474,10 +476,7 @@ export function MemoryWorkspace(props: Props) {
           record.context.generation !== active?.generation) && (
           <section className="card" role="status">
             <p>
-              {t.original}:{" "}
-              <code>
-                {record.context.endpoint} · {record.context.scopeId}
-              </code>
+              {t.original}: <WriteTarget context={record.context} />
             </p>
             <p>
               {record.status === "unknown"
