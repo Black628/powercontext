@@ -24,6 +24,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 from fastapi.routing import APIRoute
+from sqlalchemy import select
 from starlette.middleware import Middleware
 
 from powercontext._logging import log_safely
@@ -36,7 +37,9 @@ from powercontext.builtin.artifacts.profile.service import ProfileGenerator
 from powercontext.builtin.artifacts.skill import ExternalSkillProvider, SkillGenerator
 from powercontext.builtin.dream.generation import DreamGenerator
 from powercontext.builtin.inference import EmbeddingModel
+from powercontext.builtin.persistence.records import RelationalRecordService
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
+from powercontext.builtin.persistence.tables import ARTIFACT_FAMILY_SCHEMAS_TABLE
 from powercontext.builtin.records import BaseOperationNotSupportedError
 from powercontext.builtin.runtime import (
     BuiltinRuntime,
@@ -61,6 +64,7 @@ from powercontext.http import (
 from powercontext.paths import default_scheduler_path
 from powercontext.server.access import HttpAccessLogMiddleware
 from powercontext.server.app import _bind_evidence_access, access_readiness_checks, create_app
+from powercontext.server.artifact_plugins import ArtifactPluginManager
 from powercontext.server.authentication import (
     AuthenticationProvider,
     StaticBearerAuthenticationProvider,
@@ -81,6 +85,7 @@ from powercontext.server.authz.owner_recovery import (
     owner_recovery_session,
     owner_write_access,
 )
+from powercontext.server.authz.profiles import register_custom_artifact_access_family
 from powercontext.server.authz.repository import RelationalAccessRepository
 from powercontext.server.context import current_principal, current_request_id
 from powercontext.server.cursor_secret import resolve_cursor_secret
@@ -287,7 +292,35 @@ def create_server_app(  # noqa: C901
             identity_repository = ServerIdentityRepository(runtime.primary_database)
             await identity_repository.initialize()
             server_id = await identity_repository.load_or_create()
+            records = await _restore_artifact_access_profiles(runtime)
             _bind_evidence_access(runtime, active_access_control, resolved.access.mode)
+            if (
+                config.runtime.artifact_processing_supervisor_mode == "global"
+                and config.runtime.artifact_processing_role != "api"
+            ):
+
+                def bind_plugin_supervisor(supervisors) -> None:
+                    runtime.artifact_processing_supervisor = supervisors
+
+                app.state.artifact_plugin_manager = await resources.enter_async_context(
+                    ArtifactPluginManager(
+                        records.database,
+                        config.database,
+                        runtime.artifact_processing_supervisor,
+                        lambda: build_worker_security(
+                            resolved,
+                            active_access_control,
+                            legacy_static_principal=static_principal if legacy_static_admin else None,
+                            enabled=True,
+                            injected=configured_access_control is not None,
+                        ),
+                        on_supervisor=bind_plugin_supervisor,
+                        plugins_dir=resolved.artifact_plugins_dir,
+                        embedding_model=runtime._topic_memory_embedding_model,
+                        inference_config=config.inference,
+                        runtime_config=config.runtime,
+                    )
+                )
             if active_access_control is not None:
                 migrated, unresolved = await runtime._records().migrate_handoff_receipts(
                     active_access_control.committed_receipt_identity,
@@ -326,6 +359,7 @@ def create_server_app(  # noqa: C901
             finally:
                 _log_lifecycle("server.stopping", "PowerContext Server is stopping")
                 readiness_probe.unbind()
+                app.state.artifact_plugin_manager = None
                 app.state.application = None
                 app.state.dashboard_runtime = None
                 app.state.capability_provider = None
@@ -412,6 +446,18 @@ def create_server_app(  # noqa: C901
     if resolved.dashboard.enabled:
         mount_dashboard(app)
     return app
+
+
+async def _restore_artifact_access_profiles(runtime: BuiltinRuntime) -> RelationalRecordService:
+    """Restore retained family access even when this process runs no plugin manager."""
+    records = runtime._records()
+    if not isinstance(records, RelationalRecordService):
+        raise TypeError("Artifact plugins require relational record storage")  # noqa: TRY003
+    async with records.database.transaction() as connection:
+        families = (await connection.execute(select(ARTIFACT_FAMILY_SCHEMAS_TABLE.c.family).distinct())).scalars().all()
+    for family in families:
+        register_custom_artifact_access_family(family)
+    return records
 
 
 def _state_access_checks(app: FastAPI) -> Callable[[], Awaitable[Mapping[str, str]]]:
