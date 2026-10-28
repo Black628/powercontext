@@ -81,9 +81,12 @@ jobs:
       - name: Verify Windows vault across processes
         run: cargo run --locked --manifest-path src-tauri/Cargo.toml --example credential_probe
       - name: Set up Python fixture tooling
+        timeout-minutes: 5
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
         with:
           version: "0.10.12"
+          # Use the release source directly; a stalled mirror download can exhaust the job budget.
+          download-from-astral-mirror: false
           enable-cache: true
           cache-suffix: desktop-${{ github.job }}-py3.12
           cache-dependency-glob: |

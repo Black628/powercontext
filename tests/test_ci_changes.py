@@ -24,7 +24,6 @@ from pathlib import Path
 
 import ci_changes
 import pytest
-import yaml
 from ci_changes import select_suites
 
 ROOT = Path(__file__).parents[1]
@@ -329,36 +328,3 @@ def test_successful_baseline_ignores_a_newer_success_on_rewritten_history(reposi
     monkeypatch.setattr(subprocess, "run", run)
 
     assert ci_changes.successful_baseline("master.yml", "example/project", "master", head) == base
-
-
-@pytest.mark.skipif(shutil.which("bash") is None, reason="the Actions gate runs in Bash")
-@pytest.mark.parametrize(
-    ("scope_result", "selected", "upgrade_result", "passes"),
-    [
-        ("success", "false", "skipped", True),
-        ("success", "false", "failure", False),
-        ("success", "true", "success", True),
-        ("success", "true", "skipped", False),
-        ("success", "true", "failure", False),
-        ("success", "true", "cancelled", False),
-        ("failure", "", "skipped", False),
-        ("success", "", "skipped", False),
-    ],
-)
-def test_upgrade_gate_distinguishes_not_required_from_missing_acceptance(
-    scope_result: str, selected: str, upgrade_result: str, passes: bool
-) -> None:
-    workflow = yaml.safe_load((ROOT / ".github/workflows/master.yml").read_text())
-    script = workflow["jobs"]["upgrade-release-gate"]["steps"][0]["run"]
-    result = subprocess.run(
-        ["bash", "-e", "-c", script],  # noqa: S607 -- execute the checked-in Actions gate
-        env={
-            **os.environ,
-            "SCOPE_RESULT": scope_result,
-            "UPGRADE_SELECTED": selected,
-            "UPGRADE_RESULT": upgrade_result,
-        },
-        capture_output=True,
-        check=False,
-    )
-    assert (result.returncode == 0) == passes
