@@ -783,6 +783,11 @@ def _artifact_processing_bindings(  # noqa: C901 - validate and assemble one reg
                 if family == "profile" and config.runtime.profile_schedule_enabled
                 else None,
                 timezone=config.runtime.profile_timezone if family == "profile" else "Asia/Shanghai",
+                source_count_threshold=(
+                    config.runtime.memory_source_count_threshold if family == "memory" 
+                    else config.runtime.topic_memory_source_count_threshold if family == "topic-memory" 
+                    else None
+                ),
                 pending_provider=None
                 if family == "skill"
                 else SourceProcessingPendingProvider(contexts.database, binding, family),

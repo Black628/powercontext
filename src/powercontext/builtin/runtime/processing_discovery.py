@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncConnection
 
@@ -24,6 +26,36 @@ from powercontext.builtin.persistence.database import AsyncDatabase
 from powercontext.builtin.persistence.processing_intents import ArtifactProcessingIntentRepository
 from powercontext.builtin.persistence.supervision import ArtifactProcessingFence, ArtifactProcessingLeaseRepository
 from powercontext.builtin.persistence.tables import PROFILE_POLICIES_TABLE, SOURCE_JOURNAL_HEADS_TABLE
+
+
+async def pending_source_counts(
+    connection: AsyncConnection,
+    scope_ids: Sequence[str],
+    binding_name: str,
+) -> dict[str, int]:
+    """Return journal entries after each Scope's last committed cursor.
+
+    Counts come from persisted Source identities only. A replay or receipt
+    upgrade leaves the journal unchanged, so it cannot add pending work.
+    """
+
+    scopes = tuple(dict.fromkeys(scope_ids))
+    if not scopes:
+        return {}
+    cursors = await SourceCursorRepository().load_many(connection, scopes, binding_name)
+    heads = dict(
+        (
+            await connection.execute(
+                select(SOURCE_JOURNAL_HEADS_TABLE.c.scope_id, SOURCE_JOURNAL_HEADS_TABLE.c.position).where(
+                    SOURCE_JOURNAL_HEADS_TABLE.c.scope_id.in_(scopes)
+                )
+            )
+        ).all()
+    )
+    return {
+        scope: max(0, int(heads.get(scope, 0)) - (0 if scope not in cursors else cursors[scope].cursor.sequence))
+        for scope in scopes
+    }
 
 
 async def enabled_profile_scopes(connection: AsyncConnection, scope_ids: tuple[str, ...]) -> frozenset[str]:

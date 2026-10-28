@@ -209,6 +209,38 @@ class ArtifactProcessingIntentRepository:
             or 0
         )
 
+    async def admit_count(
+        self,
+        connection: AsyncConnection,
+        scope_id: str,
+        binding_name: str,
+        /,
+    ) -> StoredArtifactProcessingIntent:
+        """Accept one count-triggered window without repeating accepted work.
+
+        The caller has already verified the persisted journal threshold. A
+        pending request or an already-cleaned generation is left untouched so
+        retries and duplicate discovery cannot multiply invocations.
+        """
+
+        _require_key(scope_id, binding_name)
+        current = await self.load(connection, scope_id, binding_name, for_update=True)
+        if current is None:
+            raise InvalidRepositoryArgumentError("scope_id", "count member is not registered")
+        if current.dirty_generation <= current.clean_generation:
+            return current
+        if current.requested_generation != current.handled_generation:
+            return current
+        table = ARTIFACT_PROCESSING_INTENTS_TABLE
+        await connection.execute(
+            update(table)
+            .where(table.c.scope_id == scope_id, table.c.binding_name == binding_name)
+            .values(requested_generation=table.c.requested_generation + 1)
+        )
+        return cast(
+            StoredArtifactProcessingIntent, await self.load(connection, scope_id, binding_name, for_update=True)
+        )
+
     async def admit(
         self,
         connection: AsyncConnection,
