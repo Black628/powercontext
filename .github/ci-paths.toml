@@ -54,6 +54,7 @@ docs_tests = ["docs/**", "README*.md"]
 native = ["tests/native/**", "tests/test_service*.py", "tests/test_cursor_secret.py", "tests/test_server.py"]
 harness = [
   "e2e/**", "integrations/bub/**", "scripts/scan_e2e_evidence.sh", "tests/test_e2e_workflow_contract.py",
+  ".github/workflows/e2e-harness.yml",
   "tests/e2e/test_atomic_memory_search_authorization_snapshot.py", "tests/e2e/test_atomic_memory_read_snapshot.py",
   "tests/e2e/test_runtime_server.py",
 ]

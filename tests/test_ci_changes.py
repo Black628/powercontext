@@ -179,6 +179,15 @@ def test_legacy_evaluation_and_cross_host_changes_select_behavioral_suites(
     assert {suite for suite, enabled in selected.items() if enabled} == expected
 
 
+def test_harness_workflow_change_selects_acceptance_and_database_suites(repository: Path) -> None:
+    base = git(repository, "rev-parse", "HEAD")
+    head = commit(repository, ".github/workflows/e2e-harness.yml")
+
+    selected = run_selector(repository, "pull_request", base, head)
+
+    assert {suite for suite, enabled in selected.items() if enabled} == {"harness", "database"}
+
+
 def test_diff_covers_all_pr_commits_and_excludes_base_branch_changes(repository: Path) -> None:
     git(repository, "checkout", "-b", "feature")
     commit(repository, "integrations/pi/plugin.ts")
