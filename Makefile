@@ -33,6 +33,8 @@ workflow-actions-check: ## Verify third-party GitHub Actions use immutable commi
 	@uv run python scripts/check_workflow_actions.py .github/workflows .github/actions
 	@echo "🚀 Checking lock file consistency with 'pyproject.toml'"
 	@uv lock --locked
+	@uv lock --project e2e/bub --locked
+	@uv lock --project evaluation --locked
 	@echo "🚀 Linting code: Running prek"
 	@uv run prek run -a
 	@echo "🚀 Static type checking: Running ty"
