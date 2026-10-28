@@ -21,7 +21,7 @@ use powercontext_desktop::{
         profiles::ProfileRepository,
         session::{ConnectionManager, WriteStatus},
     },
-    credentials::WindowsVault,
+    credentials::NativeVault,
     error::SafeError,
 };
 use std::sync::{
@@ -107,6 +107,7 @@ async fn setup_response(response: serde_json::Value) -> Fixture {
                     .unwrap()
                     .to_owned();
                 let (status, value) = match path.as_str() {
+                    "/v1/server-info" => (404, serde_json::json!({})),
                     "/v1/access/me" => (
                         503,
                         serde_json::json!({"error":{"code":"runtime_not_ready"}}),
@@ -151,7 +152,7 @@ async fn setup_response(response: serde_json::Value) -> Fixture {
     });
     let dir = tempfile::tempdir().unwrap();
     let manager = Arc::new(common::connection_manager(
-        ProfileRepository::open(dir.path().join("profiles.json"), Arc::new(WindowsVault)).unwrap(),
+        ProfileRepository::open(dir.path().join("profiles.json"), Arc::new(NativeVault)).unwrap(),
     ));
     let compatibility = common::PROFILE_ID;
     let mut ids = vec![];

@@ -842,6 +842,12 @@ from powercontext.server.authz.models import (
     ROLE_SUBJECT_TYPES,
     HandoffReceiptIdentity,
 )
+from powercontext.server.authz.owner_recovery import (
+    flush_owner_writes,
+    owner_recovery_available,
+    owner_recovery_session,
+    owner_write_access,
+)
 from powercontext.server.authz.profiles import ARTIFACT_FAMILY_PROFILES, artifact_family_profile
 from powercontext.server.authz.service import _require_allowed
 from powercontext.server.context import (
@@ -858,6 +864,7 @@ from powercontext.server.dream_compatibility import (
     negotiate_dream_contract,
     require_extended_dream,
 )
+from powercontext.server.request_id import REQUEST_ID_HEADER
 from powercontext.server.tracing import request_id_from_span
 from powercontext.sources import ConnectorBinding as RuntimeConnectorBinding
 from powercontext.sources import SourceDefinitionManifest as RuntimeSourceDefinitionManifest
@@ -867,7 +874,6 @@ if TYPE_CHECKING:
     from powercontext.server.tracing import ServerTracing
 
 _SCALAR_JS_URL = "https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.66.1"
-REQUEST_ID_HEADER = "X-PowerContext-Request-ID"
 REPORT_SELECTION_DIGEST_HEADER = "X-PowerContext-Selection-Digest"
 REPORT_DIGEST_HEADER = "X-PowerContext-Report-Digest"
 MAX_HANDOFF_REPORT_BYTES = 10 * 1024 * 1024
@@ -1365,6 +1371,7 @@ def create_app(
     app.state.readiness_probe = readiness_probe
     app.state.access_control = access_control
     app.state.authentication_provider = authentication_provider
+    app.state.owner_recovery = None
     app.state.access_mode = (
         ("disabled" if access_control is None else access_control.mode) if access_mode is None else access_mode
     )
@@ -1389,7 +1396,7 @@ def create_app(
 
     @app.middleware("http")
     async def attach_request_id(request: Request, call_next: RequestResponseEndpoint) -> Response:
-        request_id = request_id_from_span()
+        request_id = current_request_id() or request_id_from_span()
         request.state.request_id = request_id
         token = bind_request_id(request_id)
         try:
@@ -1526,7 +1533,10 @@ def create_app(
     _add_route(app, SEARCH_MEMORY, search_memory)
     _add_route(app, PREPARE_BOOTSTRAP_CONTEXT, prepare_bootstrap_context)
     _add_route(app, RECORD_BOOTSTRAP_DELIVERY, record_bootstrap_delivery)
-    _add_route(app, PREPARE_CONTEXT, prepare_context)
+    # This response publishes exactly the fields it built: ``reason`` exists only when the request asked
+    # with ``explain``, and serializing the model's defaults would add a null that every Host's
+    # four-field validator rejects on an ordinary injection.
+    _add_route(app, PREPARE_CONTEXT, prepare_context, response_model_exclude_unset=True)
     _add_route(app, QUERY_CODE, query_code)
     _add_route(app, CREATE_WORK_CONTRACT, create_work_contract)
     _add_route(app, HANDOFF_CURRENT_WORK, handoff_current_work)
@@ -1537,7 +1547,8 @@ def create_app(
     _add_route(app, FINALIZE_HANDOFF, finalize_handoff)
     _add_route(app, COMMIT_HANDOFF, commit_handoff)
     _add_route(app, CONTINUE_HANDOFF, continue_handoff)
-    _add_route(app, PREPARE_HANDOFF_HINT, prepare_handoff_hint)
+    # A hint carries no retrieval, so ``reason`` stays unset and the envelope keeps its four fields.
+    _add_route(app, PREPARE_HANDOFF_HINT, prepare_handoff_hint, response_model_exclude_unset=True)
     _add_route(app, LIST_MEMORY_ENTRIES, list_memory_entries)
     _add_route(app, GET_MEMORY_CAPACITY, get_memory_capacity)
     _add_route(app, GET_MEMORY_ENTRY, get_memory_entry)
@@ -2215,9 +2226,11 @@ async def publish_artifact(
         nonlocal owner_committed
         if access is None:
             return
+        if principal is None:
+            raise AccessIdentityRequiredError
         target = publication.target
         if target.artifact.family != "topic-memory":
-            await access.with_connection(connection).establish_artifact_owner(
+            await owner_write_access(access, connection).establish_artifact_owner(
                 ResourceRef.artifact(
                     target.scope_id, family=target.artifact.family, artifact_id=target.artifact.artifact_id
                 ),
@@ -2238,6 +2251,7 @@ async def publish_artifact(
         ),
         **({"on_commit": on_commit} if access is not None else {}),
     )
+    await flush_owner_writes()
     if access is None and result.target.artifact.family != "topic-memory":
         await _establish_created_owner(
             http_request,
@@ -2251,16 +2265,13 @@ async def publish_artifact(
         )
     elif access is not None and not owner_committed and result.target.artifact.family != "topic-memory":
         target = result.target
-        if (
-            await access.artifact_owner(
-                ResourceRef.artifact(
-                    target.scope_id,
-                    family=target.artifact.family,
-                    artifact_id=target.artifact.artifact_id,
-                )
-            )
-            is None
-        ):
+        resource = ResourceRef.artifact(
+            target.scope_id,
+            family=target.artifact.family,
+            artifact_id=target.artifact.artifact_id,
+        )
+        await flush_owner_writes(artifact=resource)
+        if await access.artifact_owner(resource) is None:
             raise AccessUnavailableError("artifact_owner_pending")
     return TransportArtifactPublication.model_validate(result.model_dump(mode="json"))
 
@@ -2482,8 +2493,10 @@ async def flush_profile(
     async def on_commit(connection, artifact, candidate):
         if access is None:
             return
-        bound = access.with_connection(connection)
-        if artifact is not None and await bound.artifact_owner(resource) is None:
+        if principal is None:
+            raise AccessIdentityRequiredError
+        bound = owner_write_access(access, connection)
+        if artifact is not None and await access.for_read(connection).artifact_owner(resource) is None:
             await bound.establish_artifact_owner(
                 resource,
                 principal,
@@ -2502,6 +2515,10 @@ async def flush_profile(
 
     result = await application.profiles.flush(
         request.scope_id, authorize_snapshot=authorize_snapshot, on_commit=on_commit
+    )
+    await flush_owner_writes(
+        artifact=resource,
+        candidate=None if result.candidate_id is None else (request.scope_id, result.candidate_id),
     )
     return FlushProfileResponse.model_validate(result.model_dump(mode="json"))
 
@@ -3398,8 +3415,10 @@ async def commit_handoff(
         nonlocal committed
         if access is None:
             return
+        if principal is None:
+            raise AccessIdentityRequiredError
         if artifact.revision == 1:
-            await access.with_connection(connection).establish_artifact_owner(
+            await owner_write_access(access, connection).establish_artifact_owner(
                 ResourceRef.artifact(request.scope_id, family="handoff", artifact_id=artifact.artifact_id),
                 principal,
                 idempotency_key=f"handoff-owner:{request.scope_id}:{artifact.artifact_id}",
@@ -3411,6 +3430,7 @@ async def commit_handoff(
         mapping.runtime_prepared_handoff(request.handoff),
         **({"on_commit": on_commit} if access is not None else {}),
     )
+    await flush_owner_writes()
     if access is None and result.revision == 1:
         await _establish_created_owner(
             http_request,
@@ -3424,6 +3444,7 @@ async def commit_handoff(
         )
     elif access is not None and not committed:
         resource = ResourceRef.artifact(request.scope_id, family="handoff", artifact_id=result.artifact_id)
+        await flush_owner_writes(artifact=resource)
         if await access.artifact_owner(resource) is None:
             raise AccessUnavailableError("artifact_owner_pending")
     return mapping.committed_handoff_response(result)
@@ -4180,6 +4201,7 @@ async def _establish_base_artifact_owners(
     result: RuntimeArtifactCreated,
 ) -> None:
     if _transactional_owner_access(request) is not None:
+        await flush_owner_writes()
         return
     if result.family in {"topic-memory", "atomic-memory"}:
         return
@@ -4254,6 +4276,7 @@ async def _attest_candidate_owner(
     target: ArtifactRef | None,
 ) -> None:
     if _transactional_owner_access(request) is not None:
+        await flush_owner_writes()
         return
     access = access_control_for_mode(
         request.app.state.access_control,
@@ -4287,7 +4310,10 @@ def _transactional_owner_access(request: Request) -> AccessControlService | None
         access is not None
         and isinstance(runtime, BuiltinRuntime)
         and runtime.owner_write_database is not None
-        and access.supports_write_transaction(runtime.owner_write_database.engine)
+        and (
+            access.supports_write_transaction(runtime.owner_write_database.engine)
+            or owner_recovery_available(access, runtime.owner_write_database)
+        )
     ):
         return access
     return None
@@ -4302,7 +4328,7 @@ def _artifact_owner_commit(request: Request, scope_id: str, family: str) -> dict
 
     async def on_commit(connection, artifact):
         resource = ResourceRef.artifact(scope_id, family=family, artifact_id=artifact.artifact_id)
-        await access.with_connection(connection).establish_artifact_owner(
+        await owner_write_access(access, connection).establish_artifact_owner(
             resource, principal, idempotency_key=_base_owner_idempotency_key(resource), context=context
         )
 
@@ -4317,7 +4343,7 @@ def _candidate_owner_commit(request: Request, scope_id: str) -> dict[str, Any]:
 
     async def on_commit(connection, candidate):
         target = candidate.target
-        await access.with_connection(connection).attest_candidate_owner(
+        await owner_write_access(access, connection).attest_candidate_owner(
             scope_id=scope_id,
             candidate_id=candidate.candidate_id,
             family=candidate.family,
@@ -4840,6 +4866,8 @@ def _add_route(
     app: FastAPI,
     operation: Operation[_RequestT, _ResponseT],
     endpoint: Callable[..., Awaitable[_ResponseT | Response]],
+    *,
+    response_model_exclude_unset: bool = False,
 ) -> None:
     observed = _observe_application_operation(app, operation, endpoint)
     app.router.add_api_route(
@@ -4854,6 +4882,7 @@ def _add_route(
         tags=list(operation.tags),
         dependencies=[] if operation.access is None else [Depends(_authorization_dependency(operation))],
         route_class_override=_EncodedPathAPIRoute if operation.path.startswith("/v1/scopes/") else None,
+        response_model_exclude_unset=response_model_exclude_unset,
     )
 
 
@@ -5445,7 +5474,10 @@ def _observe_application_operation(
         started_at = perf_counter()
         span = _start_application_span(app, operation)
         try:
-            async with _current_scope(app, operation, args, kwargs):
+            async with (
+                owner_recovery_session(app.state.owner_recovery),
+                _current_scope(app, operation, args, kwargs),
+            ):
                 result = await endpoint(*args, **kwargs)
         except asyncio.CancelledError:
             _observe_application(app, operation, "cancelled", started_at)
@@ -5977,6 +6009,24 @@ def _map_scope_error(error: Exception) -> tuple[int, str, str, dict[str, Any] | 
     return None
 
 
+_CANDIDATE_ERROR_REASONS = {
+    ("artifacts", "must include the exact target"): ("artifact_refs", "target_not_in_artifact_refs"),
+    ("artifacts", "new managed Skill lineage"): ("artifact_refs", "skill_lineage_not_permitted"),
+    ("artifacts", "managed Skill lineage"): ("artifact_refs", "target_not_in_artifact_refs"),
+    ("target", "must identify a"): ("target", "target_family_mismatch"),
+    ("target", "Artifact is not available in this scope"): ("target", "target_unavailable"),
+}
+
+
+def _candidate_error_details(error: InvalidCandidateError) -> dict[str, Any] | None:
+    for (field, prefix), (public_field, reason) in _CANDIDATE_ERROR_REASONS.items():
+        if error.field == field and error.detail.startswith(prefix):
+            return {"field": public_field, "reason": reason}
+    # Internal-only fields (audit, basis, family) and reasons shared by several
+    # public fields (evidence) have no stable name a caller can act on.
+    return None
+
+
 def _map_candidate_error(error: Exception) -> tuple[int, str, str, dict[str, Any] | None] | None:
     if isinstance(error, CandidateNotFoundError):
         return status.HTTP_404_NOT_FOUND, "candidate_not_found", "The requested Candidate was not found.", None
@@ -6002,7 +6052,12 @@ def _map_candidate_error(error: Exception) -> tuple[int, str, str, dict[str, Any
             {"status": error.status},
         )
     if isinstance(error, InvalidCandidateError):
-        return status.HTTP_422_UNPROCESSABLE_CONTENT, "invalid_request", "The request is invalid.", None
+        return (
+            status.HTTP_422_UNPROCESSABLE_CONTENT,
+            "invalid_request",
+            "The request is invalid.",
+            _candidate_error_details(error),
+        )
     return None
 
 
@@ -6136,7 +6191,17 @@ def _invalid_request_details(error: Exception) -> dict[str, Any] | None:
         and error.canonical_code is not None
     ):
         return {"code": error.canonical_code, "message": str(error.detail)}
+    if isinstance(error, InvalidRuntimeRequestError):
+        reason = _WORKING_NOTE_EXPIRY_REASONS.get(error.code)
+        if reason is not None:
+            return {"field": "expires_at", "reason": reason}
     return None
+
+
+_WORKING_NOTE_EXPIRY_REASONS = {
+    "working-note-expiry-timezone": "missing_time_zone",
+    "working-note-expiry-past": "not_in_future",
+}
 
 
 def _map_source_ingestion_error(error: Exception) -> tuple[int, str, str, dict[str, Any] | None] | None:
