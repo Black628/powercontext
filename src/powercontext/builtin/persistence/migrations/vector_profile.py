@@ -82,11 +82,16 @@ class ServerVectorProfile:
                 ["table", "pc_portable_restore_receipts", "pc_portable_restore_receipts", receipt]
             ]
         if "v1_4_1_004" in manifest["revision_resources"]:
-            layouts["v1_4_1_004"] = copy.deepcopy(layouts["s1402"])
-            statement = json.loads((directory / "schemas/sqlite-v1_4_1_004.json").read_text(encoding="utf-8"))[
+            owner = json.loads((directory / "schemas/sqlite-v1_4_1_004.json").read_text(encoding="utf-8"))["create"]
+            layouts["v1_4_1_004"] = layouts["s1402"] + [
+                ["table", "pc_access_owner_recovery", "pc_access_owner_recovery", owner]
+            ]
+        if "v1_4_1_005" in manifest["revision_resources"]:
+            layouts["v1_4_1_005"] = copy.deepcopy(layouts["v1_4_1_004"])
+            statement = json.loads((directory / "schemas/sqlite-v1_4_1_005.json").read_text(encoding="utf-8"))[
                 "statement"
             ]
-            for row in layouts["v1_4_1_004"]:
+            for row in layouts["v1_4_1_005"]:
                 if row[0] == "table" and row[1] == "pc_atomic_memory_current":
                     # SQLite records ALTER TABLE's exact rewritten definition.
                     # Render it with SQLite while retaining every vector object.

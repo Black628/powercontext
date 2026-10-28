@@ -3,12 +3,38 @@
   "revisions": {
     "v1_4_1_004": {
       "statements": [
-        "ALTER TABLE pc_atomic_memory_current ADD COLUMN description VARCHAR(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL"
+        "CREATE TABLE pc_access_owner_recovery (\n\toperation_id VARCHAR(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL, \n\tdeployment_id VARCHAR(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL, \n\tscope_id VARCHAR(256) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL, \n\tcompleted TINYINT(1) NOT NULL, \n\tpayload TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL, \n\tPRIMARY KEY (operation_id), \n\tCONSTRAINT uq_pc_access_owner_recovery_pending UNIQUE (deployment_id, completed, operation_id)\n)"
       ],
       "changes": [
         {
-          "pc_atomic_memory_current": {
+          "pc_access_owner_recovery": {
             "columns": {
+              "operation_id": {
+                "type": [
+                  "varchar",
+                  [
+                    "64"
+                  ]
+                ],
+                "nullable": false,
+                "default": null,
+                "charset": "utf8mb4",
+                "collation": "utf8mb4_bin",
+                "extra": []
+              },
+              "deployment_id": {
+                "type": [
+                  "varchar",
+                  [
+                    "128"
+                  ]
+                ],
+                "nullable": false,
+                "default": null,
+                "charset": "utf8mb4",
+                "collation": "utf8mb4_bin",
+                "extra": []
+              },
               "scope_id": {
                 "type": [
                   "varchar",
@@ -22,23 +48,12 @@
                 "collation": "utf8mb4_bin",
                 "extra": []
               },
-              "artifact_id": {
+              "completed": {
                 "type": [
-                  "varchar",
+                  "tinyint",
                   [
-                    "128"
+                    "1"
                   ]
-                ],
-                "nullable": false,
-                "default": null,
-                "charset": "utf8mb4",
-                "collation": "utf8mb4_bin",
-                "extra": []
-              },
-              "revision": {
-                "type": [
-                  "bigint",
-                  []
                 ],
                 "nullable": false,
                 "default": null,
@@ -46,132 +61,12 @@
                 "collation": null,
                 "extra": []
               },
-              "state_version": {
+              "payload": {
                 "type": [
-                  "bigint",
+                  "text",
                   []
                 ],
                 "nullable": false,
-                "default": null,
-                "charset": null,
-                "collation": null,
-                "extra": []
-              },
-              "content_hash": {
-                "type": [
-                  "varchar",
-                  [
-                    "64"
-                  ]
-                ],
-                "nullable": false,
-                "default": null,
-                "charset": "utf8mb4",
-                "collation": "utf8mb4_bin",
-                "extra": []
-              },
-              "projection_format": {
-                "type": [
-                  "varchar",
-                  [
-                    "64"
-                  ]
-                ],
-                "nullable": false,
-                "default": null,
-                "charset": "utf8mb4",
-                "collation": "utf8mb4_bin",
-                "extra": []
-              },
-              "kind": {
-                "type": [
-                  "mediumtext",
-                  []
-                ],
-                "nullable": false,
-                "default": null,
-                "charset": "utf8mb4",
-                "collation": null,
-                "extra": []
-              },
-              "text": {
-                "type": [
-                  "mediumtext",
-                  []
-                ],
-                "nullable": false,
-                "default": null,
-                "charset": "utf8mb4",
-                "collation": null,
-                "extra": []
-              },
-              "searchable_text": {
-                "type": [
-                  "mediumtext",
-                  []
-                ],
-                "nullable": false,
-                "default": null,
-                "charset": "utf8mb4",
-                "collation": null,
-                "extra": []
-              },
-              "tag_keys": {
-                "type": [
-                  "mediumtext",
-                  []
-                ],
-                "nullable": false,
-                "default": null,
-                "charset": "utf8mb4",
-                "collation": null,
-                "extra": []
-              },
-              "embedding": {
-                "type": [
-                  "blob",
-                  []
-                ],
-                "nullable": true,
-                "default": null,
-                "charset": null,
-                "collation": null,
-                "extra": []
-              },
-              "profile_fingerprint": {
-                "type": [
-                  "varchar",
-                  [
-                    "64"
-                  ]
-                ],
-                "nullable": true,
-                "default": null,
-                "charset": "utf8mb4",
-                "collation": "utf8mb4_bin",
-                "extra": []
-              },
-              "embedding_input_hash": {
-                "type": [
-                  "varchar",
-                  [
-                    "64"
-                  ]
-                ],
-                "nullable": true,
-                "default": null,
-                "charset": "utf8mb4",
-                "collation": "utf8mb4_bin",
-                "extra": []
-              },
-              "description": {
-                "type": [
-                  "varchar",
-                  [
-                    "200"
-                  ]
-                ],
-                "nullable": true,
                 "default": null,
                 "charset": "utf8mb4",
                 "collation": "utf8mb4_bin",
@@ -180,130 +75,33 @@
             },
             "primary_key": [
               [
-                "scope_id",
-                null,
-                "asc"
-              ],
-              [
-                "artifact_id",
+                "operation_id",
                 null,
                 "asc"
               ]
             ],
             "foreign_keys": [],
-            "checks": {
-              "ck_pc_atomic_memory_current_revision": {
-                "expression": [
-                  "binary",
-                  ">",
-                  [
-                    "column",
-                    "revision"
-                  ],
-                  [
-                    "number",
-                    0
-                  ]
-                ],
-                "enforced": true
-              },
-              "ck_pc_atomic_memory_current_state_version": {
-                "expression": [
-                  "binary",
-                  ">=",
-                  [
-                    "column",
-                    "state_version"
-                  ],
-                  [
-                    "number",
-                    0
-                  ]
-                ],
-                "enforced": true
-              },
-              "ck_pc_atomic_memory_current_embedding_metadata": {
-                "expression": [
-                  "binary",
-                  "or",
-                  [
-                    "binary",
-                    "and",
-                    [
-                      "binary",
-                      "and",
-                      [
-                        "is_null",
-                        [
-                          "column",
-                          "embedding"
-                        ]
-                      ],
-                      [
-                        "is_null",
-                        [
-                          "column",
-                          "profile_fingerprint"
-                        ]
-                      ]
-                    ],
-                    [
-                      "is_null",
-                      [
-                        "column",
-                        "embedding_input_hash"
-                      ]
-                    ]
-                  ],
-                  [
-                    "binary",
-                    "and",
-                    [
-                      "binary",
-                      "and",
-                      [
-                        "is_not_null",
-                        [
-                          "column",
-                          "embedding"
-                        ]
-                      ],
-                      [
-                        "is_not_null",
-                        [
-                          "column",
-                          "profile_fingerprint"
-                        ]
-                      ]
-                    ],
-                    [
-                      "is_not_null",
-                      [
-                        "column",
-                        "embedding_input_hash"
-                      ]
-                    ]
-                  ]
-                ],
-                "enforced": true
-              }
-            },
+            "checks": {},
             "indexes": {
-              "ix_pc_atomic_memory_current_fts": {
+              "uq_pc_access_owner_recovery_pending": {
                 "columns": [
                   [
-                    "searchable_text",
+                    "deployment_id",
+                    null,
+                    "asc"
+                  ],
+                  [
+                    "completed",
+                    null,
+                    "asc"
+                  ],
+                  [
+                    "operation_id",
                     null,
                     "asc"
                   ]
                 ],
-                "unique": false,
-                "kind": "fulltext",
-                "parser": "space",
-                "parser_properties": {
-                  "min_token_size": 3,
-                  "max_token_size": 84
-                }
+                "unique": true
               }
             }
           }

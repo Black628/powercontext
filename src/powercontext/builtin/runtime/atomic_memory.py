@@ -27,7 +27,7 @@ from typing import cast
 from uuid import uuid4
 
 import rfc8785
-from sqlalchemy import Text, and_, func, or_, select
+from sqlalchemy import LargeBinary, Text, and_, func, literal, or_, select
 from sqlalchemy import cast as sql_cast
 from sqlalchemy.ext.asyncio import AsyncConnection
 from typing_extensions import override
@@ -440,7 +440,12 @@ class ScopedAtomicMemory:
                 .limit(limit + 1)
             )
             if kind is not None:
-                statement = statement.where(current.c.kind == kind)
+                if connection.dialect.name == "mysql":
+                    # Binary strings preserve trailing spaces as well as case.
+                    predicate = sql_cast(current.c.kind, LargeBinary) == sql_cast(literal(kind), LargeBinary)
+                else:
+                    predicate = current.c.kind.collate("BINARY") == kind
+                statement = statement.where(predicate)
             if tag_filter is not None:
                 statement = statement.where(
                     tag_predicate(
