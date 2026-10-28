@@ -17,6 +17,8 @@
 from __future__ import annotations
 
 import json
+import math
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, replace
 from itertools import chain
@@ -56,6 +58,8 @@ class _PreparedContextEntry:
     citation: dict[str, object]
     content: str
     truncated: bool
+    start: int | None = None
+    end: int | None = None
 
 
 @dataclass(frozen=True)
@@ -106,6 +110,7 @@ class PreparedContextBuild:
     origins: tuple[PreparedContextOrigin, ...]
     omissions: PreparedContextOmissions = PreparedContextOmissions()
     code_origins: tuple[CodeEvidenceRef, ...] = ()
+    fragments: tuple[PreparedContextFragment, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -115,6 +120,16 @@ class MemoryEntryAddress:
     memory: ArtifactAddress
     entry_id: str
     entry_version_id: str
+
+
+@dataclass(frozen=True)
+class PreparedContextFragment:
+    """One literal span of a Memory entry selected as query evidence."""
+
+    address: MemoryEntryAddress
+    start: int
+    end: int
+    text: str
 
 
 PreparedContextOrigin = MemoryCitation | ArtifactRef | MemoryEntryAddress | ArtifactAddress
@@ -235,6 +250,9 @@ class PreparedContextBuilder:
         if sum(len(candidates.hits) for candidates in experience_candidates) > self.experience_candidate_limit:
             raise PreparedContextInvariantError("experience-candidate-limit")
 
+        if request.evidence_selection:
+            return self._build_evidence_selection(request, memory_candidates)
+
         content, origins, omissions = self._select_entries(
             request=request,
             current_scope_id=current_scope_id,
@@ -254,6 +272,69 @@ class PreparedContextBuilder:
             context=PreparedContext(status="ready", content=content, content_bytes=content_bytes),
             origins=origins,
             omissions=omissions,
+        )
+
+    def _build_evidence_selection(
+        self,
+        request: PrepareContextRequest,
+        memory_candidates: Sequence[PreparedMemoryCandidates],
+    ) -> PreparedContextBuild:
+        """Select literal query-relevant spans from the Memory candidates."""
+
+        candidates: list[tuple[MemoryEntryAddress, str]] = []
+        seen: set[tuple[str, str, str]] = set()
+        for group in memory_candidates:
+            if group.memory_ref is None:
+                continue
+            for hit in group.hits:
+                identity = (group.scope_id, hit.entry_id, hit.entry_version_id)
+                if identity in seen or not hit.text.strip():
+                    continue
+                seen.add(identity)
+                candidates.append(
+                    (
+                        MemoryEntryAddress(
+                            memory=ArtifactAddress(scope_id=group.scope_id, artifact=group.memory_ref),
+                            entry_id=hit.entry_id,
+                            entry_version_id=hit.entry_version_id,
+                        ),
+                        hit.text,
+                    )
+                )
+        spans = _rank_spans(candidates, request.query)
+        if not spans:
+            return PreparedContextBuild(context=self.empty(), origins=())
+
+        selected: list[_PreparedContextEntry] = []
+        dropped = 0
+        for address, start, end, text in spans:
+            entry = _fragment_entry(address, start, end, text)
+            if len(_render([*selected, entry]).encode("utf-8")) <= request.max_bytes:
+                selected.append(entry)
+                continue
+            fitted = _fit_fragment(selected, entry, request.max_bytes)
+            if fitted is None:
+                dropped += 1
+                continue
+            selected.append(fitted)
+        if not selected:
+            return PreparedContextBuild(context=self.empty(), origins=())
+
+        content = _render(selected)
+        fragments = tuple(
+            PreparedContextFragment(
+                address=entry.origin,
+                start=entry.start if entry.start is not None else 0,
+                end=entry.end if entry.end is not None else len(entry.content),
+                text=entry.content,
+            )
+            for entry in selected
+        )
+        return PreparedContextBuild(
+            context=PreparedContext(status="ready", content=content, content_bytes=len(content.encode("utf-8"))),
+            origins=tuple(entry.origin for entry in selected),
+            omissions=PreparedContextOmissions(dropped_items=dropped),
+            fragments=fragments,
         )
 
     def probe_budget(
@@ -685,6 +766,119 @@ def _interleave_groups(groups: Sequence[Sequence[_Item]]) -> tuple[_Item, ...]:
     return tuple(ordered)
 
 
+_SELECTION_TERM = re.compile(r"[a-z0-9]+")
+_SELECTION_STOPWORDS = frozenset(
+    (
+        "a an the of and or in on for to is are was were be been being what which who whom how why when where "
+        "does do did has have had it its this that these those as at by from with about into than then so if not "
+        "no we our you your they their there here can could should would may might must will shall per each also "
+        "any all such other more most less least"
+    ).split()
+)
+_SPAN_PATTERN = re.compile(r"[^.!?\n]+[.!?]*")
+_MIN_FRAGMENT_CHARS = 40
+
+
+def _selection_terms(text: str) -> list[str]:
+    return [term for term in _SELECTION_TERM.findall(text.lower()) if term not in _SELECTION_STOPWORDS and len(term) > 1]
+
+
+def _candidate_spans(text: str) -> list[tuple[int, int, str]]:
+    spans: list[tuple[int, int, str]] = []
+    for match in _SPAN_PATTERN.finditer(text):
+        chunk = match.group()
+        if not chunk.strip():
+            continue
+        offset = len(chunk) - len(chunk.lstrip())
+        stripped = chunk.strip()
+        start = match.start() + offset
+        spans.append((start, start + len(stripped), stripped))
+    return spans
+
+
+def _rank_spans(candidates: Sequence[tuple[MemoryEntryAddress, str]], query: str) -> list[tuple[MemoryEntryAddress, int, int, str]]:
+    """Rank literal spans by how much of the query each one carries."""
+
+    terms = _selection_terms(query)
+    if not terms:
+        return []
+    rows: list[tuple[MemoryEntryAddress, int, int, str, set[str]]] = []
+    for address, text in candidates:
+        for start, end, chunk in _candidate_spans(text):
+            rows.append((address, start, end, chunk, set(_selection_terms(chunk))))
+    if not rows:
+        return []
+
+    frequency: dict[str, int] = {}
+    for _, _, _, _, tokens in rows:
+        for term in set(terms) & tokens:
+            frequency[term] = frequency.get(term, 0) + 1
+    total = len(rows)
+    weights = {term: math.log(1.0 + total / count) for term, count in frequency.items()}
+    wanted = set(terms)
+
+    ranked: list[tuple[float, int, MemoryEntryAddress, int, int, str]] = []
+    for address, start, end, chunk, tokens in rows:
+        matched = [term for term in wanted if term in tokens]
+        if not matched:
+            continue
+        score = sum(weights[term] for term in matched) + 0.25 * len(matched)
+        if len(matched) == len(wanted):
+            score += 0.5
+        ranked.append((score, -start, address, start, end, chunk))
+    ranked.sort(reverse=True)
+
+    ordered: list[tuple[MemoryEntryAddress, int, int, str]] = []
+    seen: set[tuple[str, str, int, int]] = set()
+    for _, _, address, start, end, chunk in ranked:
+        identity = (address.entry_id, address.entry_version_id, start, end)
+        if identity in seen:
+            continue
+        seen.add(identity)
+        ordered.append((address, start, end, chunk))
+    return ordered
+
+
+def _fragment_entry(address: MemoryEntryAddress, start: int, end: int, text: str) -> _PreparedContextEntry:
+    citation = {
+        "scope_id": address.memory.scope_id,
+        "memory_ref": address.memory.artifact.model_dump(mode="json"),
+        "entry_id": address.entry_id,
+        "entry_version_id": address.entry_version_id,
+    }
+    return _PreparedContextEntry(
+        origin=address,
+        kind="memory",
+        citation=citation,
+        content=text,
+        truncated=False,
+        start=start,
+        end=end,
+    )
+
+
+def _fit_fragment(selected: Sequence[_PreparedContextEntry], entry: _PreparedContextEntry, max_bytes: int) -> _PreparedContextEntry | None:
+    """Shorten one fragment until the whole envelope fits the byte budget."""
+
+    start = entry.start or 0
+    low, high = 0, len(entry.content)
+    best: _PreparedContextEntry | None = None
+    while low <= high:
+        middle = (low + high) // 2
+        if middle <= 0:
+            low = 1
+            continue
+        candidate = replace(entry, content=entry.content[:middle], truncated=True, start=start, end=start + middle)
+        if len(_render([*selected, candidate]).encode("utf-8")) <= max_bytes:
+            best = candidate
+            low = middle + 1
+        else:
+            high = middle - 1
+    if best is None or len(best.content.strip()) < _MIN_FRAGMENT_CHARS:
+        return None
+    return best
+
+
 def _render(entries: Sequence[_PreparedContextEntry]) -> str:
     envelope = {
         "trust": "untrusted_history",
@@ -717,6 +911,9 @@ def _render_entry(entry: _PreparedContextEntry) -> dict[str, object]:
     }
     if entry.kind != "memory":
         rendered["kind"] = entry.kind
+    if entry.start is not None and entry.end is not None:
+        rendered["start"] = entry.start
+        rendered["end"] = entry.end
     return rendered
 
 
