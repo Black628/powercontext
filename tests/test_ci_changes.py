@@ -35,6 +35,7 @@ RULES = tomllib.loads((ROOT / ".github/ci-paths.toml").read_text(encoding="utf-8
         (["docs/zh/docs/quickstart.md"], {"website", "docs_tests"}),
         (["docs/en/rfcs/0001_design.md", "README_CN.md"], {"website", "docs_tests"}),
         (["website/src/app/page.tsx"], {"website"}),
+        (["tests/e2e/test_blog_site.py"], {"website", "tests"}),
         (["AGENTS.md", "CONTRIBUTING.md"], set()),
         (["integrations/pi/plugins/powercontext/index.ts"], {"tests", "pi", "zcode"}),
         (["integrations/kimi-code/plugins/powercontext/skills/context/SKILL.md"], {"tests", "kimi"}),

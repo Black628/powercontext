@@ -958,3 +958,8 @@ jobs:
 
       - name: Check website
         run: make docs-test
+
+      - name: Check bilingual blog exports
+        env:
+          POWERCONTEXT_TEST_BLOG_SITE: "1"
+        run: uv run pytest tests/e2e/test_blog_site.py -q
