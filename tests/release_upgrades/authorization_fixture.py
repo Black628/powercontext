@@ -25,8 +25,8 @@ from pathlib import Path
 
 import httpx
 
+from powercontext.builtin.authz import PrincipalRef
 from powercontext.server.authentication import StaticBearerAuthenticationProvider
-from powercontext.server.authz import PrincipalRef
 from powercontext.server.factory import create_server_app
 from powercontext.server.settings import ServerSettings
 
