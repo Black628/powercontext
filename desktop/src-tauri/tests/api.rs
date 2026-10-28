@@ -96,6 +96,76 @@ async fn exact_scope_uses_one_encoded_path_segment() {
             .starts_with("GET /proxy/%E4%B8%AD%E6%96%87/v1/scopes/scope%2F%E4%B8%AD%E6%96%87%3Fx ")
     );
 }
+
+#[tokio::test]
+async fn discovery_requests_are_observed_without_counting_a_user_operation() {
+    for status in [200, 404] {
+        let observations = SessionObservations::default();
+        let body = if status == 200 {
+            r#"{"schema_version":{"major":1,"minor":0},"product":"powercontext","server_id":"private-server","package_version":"1.4.0","api_contract_version":{"major":1,"minor":4},"feature_contracts":{}}"#
+        } else {
+            "private discovery error"
+        };
+        let (api, request) = fixture(status, body).await;
+        let result = api
+            .with_observations(observations.clone())
+            .server_info()
+            .await;
+        if status == 200 {
+            assert!(result.is_ok());
+        } else {
+            assert_eq!(result.err().unwrap().code, SafeError::NotFound);
+        }
+        assert!(
+            request
+                .await
+                .unwrap()
+                .starts_with("GET /proxy/%E4%B8%AD%E6%96%87/v1/server-info ")
+        );
+        let summary = observations.summary().unwrap();
+        assert!(
+            summary
+                .coverage
+                .http_operations
+                .contains(&ObservedOperation::GetServerInfo)
+        );
+        assert!(
+            !summary
+                .coverage
+                .user_operations
+                .contains(&ObservedOperation::GetServerInfo)
+        );
+        assert_eq!(summary.recent.len(), 1);
+        let record = &summary.recent[0];
+        assert_eq!(record.unit, ObservationUnit::HttpRequest);
+        assert_eq!(record.operation, ObservedOperation::GetServerInfo);
+        assert_eq!(record.http_status, Some(status));
+        assert_eq!(
+            record.outcome,
+            if status == 200 {
+                ObservationOutcome::Success
+            } else {
+                ObservationOutcome::Failure
+            }
+        );
+        assert!(!observations.diagnostic_text().unwrap().contains("private"));
+    }
+}
+
+#[tokio::test]
+async fn discovery_rejects_duplicate_deployment_identity_fields() {
+    let (api, request) = fixture(200, r#"{"schema_version":{"major":1,"minor":0},"product":"powercontext","server_id":"old","server_id":"new","package_version":"1.4.0","api_contract_version":{"major":1,"minor":4},"feature_contracts":{}}"#).await;
+    assert_eq!(
+        api.server_info().await.err().unwrap().code,
+        SafeError::InvalidResponse
+    );
+    assert!(
+        request
+            .await
+            .unwrap()
+            .starts_with("GET /proxy/%E4%B8%AD%E6%96%87/v1/server-info ")
+    );
+}
 #[tokio::test]
 async fn readiness_failure_is_a_fact_and_write_failure_keeps_dispatch_uncertainty() {
     let (api, request) = fixture(

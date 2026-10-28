@@ -20,7 +20,7 @@ Desktop 为 [#2107](https://github.com/oceanbase/powercontext/issues/2107) 提�
 | `http_request` | 一次交给原生 HTTP 客户端的请求 | 从派发到完成有界响应读取、JSON 解码，或失败、取消的单调时钟耗时 |
 | `user_operation` | 一次原生 Memory 或 Scope 操作调用，包括被拒绝的调用 | 从进入原生操作到完成上下文与身份检查、响应校验及结果构造，或失败、取消的单调时钟耗时 |
 
-HTTP 覆盖 `get_liveness`、`get_readiness`、`get_capabilities`、`get_access_principal`、`list_scopes`、
+HTTP 覆盖 `get_server_info`、`get_liveness`、`get_readiness`、`get_capabilities`、`get_access_principal`、`list_scopes`、
 `get_scope`、`get_default_scope`、`remember_memory`、`search_memory` 和 `get_artifact_revision`。
 连接检查只计入它实际发出的各项 HTTP 请求，不额外产生用户操作。身份复核及现有匿名访问的就绪检查回退也计入 HTTP 请求。
 因此，一次用户操作可能产生多个请求；`coverage.httpOperations` 和 `coverage.identityChecksIncluded` 明确说明该范围。
@@ -55,13 +55,14 @@ HTTP Future 被取消时记录 `cancelled`，不代表远端写入已经取消�
 按上下文增长的集合。退出 Desktop 会丢弃全部观察；重新打开时建立空会话。
 
 重置清空保留记录、分组和淘汰数量，更新窗口起点；不改变会话起点或业务状态，也不取消任务。
-重置前创建的观察守卫不会重新填入新窗口。重置后才开始的 HTTP 请求仍可能出现，即使它所属的用户操作开始于重置前。
+重置前创建的观察守卫不会重新填入新窗口；它们结束时，每条被排除的 HTTP 请求或用户操作都会递增 `droppedSinceStart`。
+重置后才开始的 HTTP 请求仍可能出现，即使它所属的用户操作开始于重置前。
 
 连接、Principal 和 Scope 切换保留进程范围内的匿名观察。记录不存储目标身份，历史结果和晚到结果不会被归到新选择的目标。
 原有私有上下文失效、读取取消和已派发写入的不可变目标仍由连接管理器负责。
 
 记录过程使用非阻塞锁，不执行 I/O。锁竞争或采集器锁中毒只会丢弃观察，不改变业务结果，也不抑制取消。
-`droppedSinceStart` 统计整个进程的此类丢失数量，重置后仍保留，避免重置掩盖覆盖缺失。
+`droppedSinceStart` 统计整个进程的此类丢失数量，包括重置前开始、结束时被排除的观察，重置后仍保留，避免重置掩盖覆盖缺失。
 读取或重置时遇到锁竞争返回 `busy`，采集器锁中毒返回 `storage`，不会伪造成功的空摘要。
 
 ## 安全投影契约

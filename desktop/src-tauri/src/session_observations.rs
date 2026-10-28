@@ -41,6 +41,7 @@ pub enum ObservationUnit {
 #[serde(rename_all = "snake_case")]
 pub enum ObservedOperation {
     GetLiveness,
+    GetServerInfo,
     GetReadiness,
     GetCapabilities,
     GetAccessPrincipal,
@@ -55,6 +56,7 @@ impl ObservedOperation {
     pub(crate) fn id(self) -> &'static str {
         match self {
             Self::GetLiveness => "get_liveness",
+            Self::GetServerInfo => "get_server_info",
             Self::GetReadiness => "get_readiness",
             Self::GetCapabilities => "get_capabilities",
             Self::GetAccessPrincipal => "get_access_principal",
@@ -206,8 +208,8 @@ impl SessionObservations {
                 }
                 window.records.push_back(observation);
             }
-            Ok(_) => (), // A pre-reset operation cannot repopulate the new window.
-            Err(_) => {
+            // A pre-reset operation cannot repopulate the new window, but its loss remains visible.
+            Ok(_) | Err(_) => {
                 let _ = self
                     .0
                     .dropped
@@ -274,6 +276,7 @@ impl SessionObservations {
                 persistence_evidence: false,
                 http_operations: vec![
                     ObservedOperation::GetLiveness,
+                    ObservedOperation::GetServerInfo,
                     ObservedOperation::GetReadiness,
                     ObservedOperation::GetCapabilities,
                     ObservedOperation::GetAccessPrincipal,

@@ -78,6 +78,13 @@ def pytest_addoption(parser: pytest.Parser) -> None:
         default=False,
         help="Require native DSH configuration APIs without requiring the DSH CLI.",
     )
+    claude_code = parser.getgroup("powercontext-claude-code")
+    claude_code.addoption(
+        "--require-claude-code-python-floor",
+        action="store_true",
+        default=False,
+        help="Require Python 3.9 for the Claude Code plugin entry point test instead of skipping it.",
+    )
     zcode = parser.getgroup("zcode-host-acceptance")
     zcode.addoption("--run-zcode-acceptance", action="store_true", help="Run real ZCode CLI acceptance.")
     zcode.addoption(
@@ -161,6 +168,10 @@ def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item
 
 
 def pytest_ignore_collect(collection_path: Path, config: pytest.Config) -> bool | None:
+    # Installed-release suites run only through the mandatory artifact gate.
+    # The gate uses --confcutdir to exclude this repository conftest entirely.
+    if collection_path.resolve() == (Path(__file__).parent / "release_upgrades").resolve():
+        return True
     # Alembic executes env.py as migration configuration; doctest collection
     # must not import it as a test module.
     if collection_path.resolve() == _DATABASE_MIGRATION_ENV.resolve():

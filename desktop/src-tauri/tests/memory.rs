@@ -110,6 +110,7 @@ async fn setup_response(response: serde_json::Value) -> Fixture {
                     .unwrap()
                     .to_owned();
                 let (status, value) = match path.as_str() {
+                    "/v1/server-info" => (404, serde_json::json!({})),
                     "/v1/access/me" => (
                         503,
                         serde_json::json!({"error":{"code":"runtime_not_ready"}}),
@@ -483,14 +484,24 @@ async fn reset_excludes_in_flight_observations_without_cancelling_the_write() {
     fixture.release.notify_one();
     let outcome = write.await.unwrap().unwrap();
     assert_eq!(outcome.record.status, WriteStatus::Succeeded);
-    assert!(
+    let summary = fixture.manager.observations().summary().unwrap();
+    assert!(summary.recent.is_empty());
+    assert!(summary.operations.is_empty());
+    assert_eq!(summary.evicted, 0);
+    // Both the HTTP request and its user operation completed outside their reset window.
+    assert_eq!(summary.dropped_since_start, 2);
+    let preview: serde_json::Value =
+        serde_json::from_str(&fixture.manager.observations().diagnostic_text().unwrap()).unwrap();
+    assert_eq!(preview["droppedSinceStart"], 2);
+    fixture.manager.observations().reset().unwrap();
+    assert_eq!(
         fixture
             .manager
             .observations()
             .summary()
             .unwrap()
-            .recent
-            .is_empty()
+            .dropped_since_start,
+        2
     );
     assert_eq!(fixture.requests.lock().unwrap().len(), 1);
 }

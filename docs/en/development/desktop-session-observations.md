@@ -21,8 +21,8 @@ Every record declares `unit` and the owning operation ID in `operation`.
 | `http_request` | One request handed to the native HTTP client | Monotonic time from dispatch through bounded response reading and JSON decoding, or failure/cancellation |
 | `user_operation` | One native Memory or Scope action invocation, including rejected invocations | Monotonic time from entering the native action through context/identity checks, response validation and result construction, or failure/cancellation |
 
-HTTP coverage includes `get_liveness`, `get_readiness`, `get_capabilities`, `get_access_principal`, `list_scopes`,
-`get_scope`, `get_default_scope`, `remember_memory`, `search_memory`, and `get_artifact_revision`. Native connection
+HTTP coverage includes `get_server_info`, `get_liveness`, `get_readiness`, `get_capabilities`,
+`get_access_principal`, `list_scopes`, `get_scope`, `get_default_scope`, `remember_memory`, `search_memory`, and `get_artifact_revision`. Native connection
 checks contribute their individual HTTP requests, not an additional user operation. Identity revalidation and its
 existing anonymous-access readiness fallback also contribute HTTP requests. A user action can therefore issue multiple
 HTTP requests. The summary's `coverage.httpOperations` and `coverage.identityChecksIncluded` disclose that coverage.
@@ -64,7 +64,8 @@ per-context collection. Closing Desktop discards all observations; reopening cre
 
 Reset clears retained records, groups and the eviction count and moves the window start. It does not reset the
 Desktop session start, affect business state, or cancel work. Guards created before reset cannot repopulate the new
-window. Requests started after reset can appear even if their enclosing user operation began earlier.
+window. When they finish, each excluded HTTP request or user operation increments `droppedSinceStart`.
+Requests started after reset can appear even if their enclosing user operation began earlier.
 
 Connection, Principal and Scope transitions keep anonymous process-wide observations. No record stores target
 identity, and no historical or late result is assigned to a newly selected target. Existing private-context invalidation,
@@ -72,8 +73,8 @@ read cancellation and immutable dispatched-write targeting remain owned by the c
 
 Recording uses a nonblocking lock and no I/O. Contention or a poisoned collector drops the observation without
 changing business results or suppressing cancellation. `droppedSinceStart` counts such losses over the process
-lifetime and intentionally survives reset, so resets cannot conceal incomplete coverage. Snapshot/reset contention
-returns `busy`; a poisoned collector returns `storage`, rather than fabricating an empty successful summary.
+lifetime, including pre-reset observations excluded on completion, and intentionally survives reset, so resets cannot
+conceal incomplete coverage. Snapshot/reset contention returns `busy`; a poisoned collector returns `storage`, rather than fabricating an empty successful summary.
 
 ## Safe projection contract
 
