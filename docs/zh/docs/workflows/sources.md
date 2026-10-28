@@ -57,4 +57,18 @@ fingerprint。声明缺失、无效或不可用时解析为 `untrusted`/`unknown
 投影是派生数据，维护可以丢弃它并从保留事实重建，且不查询当前 registry。声明不增加排序权重、不改变分数，
 也不授予访问权限。
 
+按精确 revision 读回保留事实：
+
+```python
+from powercontext.builtin.runtime import AtomicMemoryEvidenceAnnotation
+
+memory = runtime.atomic_memory.for_scope(scope_id)
+annotation: AtomicMemoryEvidenceAnnotation = await memory.evidence(artifact_id, revision=3)
+for source in annotation.sources:
+    print(source.source_ref.source_type, source.declaration.authority, source.declaration.verification)
+```
+
+无法再被佐证的声明解析为 `untrusted`/`unknown`。若记录与精确 Source 材料不再一致，会抛出
+`AtomicMemoryEvidenceError`，调用方可通过 `PowerContextError` 家族捕获。
+
 Source 读写受所选 [Scope 与访问策略](scopes-and-access.md)约束。
