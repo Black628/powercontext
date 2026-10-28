@@ -108,7 +108,7 @@ def builtin_prompt_definitions(
             definition_version="powercontext.prompt.atomic-memory.extract.v2",
             input_type=AtomicMemoryExtractionInput,
             output_type=AtomicMemoryExtractionOutput,
-            builtin_version=f"powercontext.atomic-memory.extract.{profile.value}.v2",
+            builtin_version=atomic_memory_extraction_instructions_version(profile),
             invariant_instructions=atomic_memory_extraction_instructions(profile),
             default_instructions=atomic_memory_extraction_instructions(profile),
             builtin_profile=profile.value,

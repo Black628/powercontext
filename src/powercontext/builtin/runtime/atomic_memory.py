@@ -652,6 +652,7 @@ class ScopedAtomicMemory:
                 text="validation",
                 description="validation",
             )
+        started = asyncio.get_running_loop().time()
         mode, vector, query_embedding, embedding_calls, embedding_fallback = await self._resolve_query_embedding(
             query,
             mode,
