@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       upgrade_selection:
-        description: Upgrade cases (seekDB Code configurations are temporarily manual)
+        description: Upgrade cases (full and automatic both run all 12 configurations)
         type: choice
-        default: automatic
+        default: full
         options:
           - automatic
           - seekdb-code
@@ -87,7 +87,7 @@ jobs:
     if: ${{ !cancelled() }}
     uses: ./.github/workflows/upgrade-release.yml
     with:
-      selection: ${{ github.event_name == 'workflow_dispatch' && inputs.upgrade_selection || 'automatic' }}
+      selection: ${{ github.event_name == 'workflow_dispatch' && inputs.upgrade_selection || 'full' }}
 
   upgrade-release-gate:
     name: Upgrade release gate
