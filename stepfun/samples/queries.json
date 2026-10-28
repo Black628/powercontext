@@ -1,0 +1,18 @@
+[
+  {
+    "query": "为什么混合检索适合同时处理术语和自然语言问题？",
+    "expectedSource": "seekdb-overview.md"
+  },
+  {
+    "query": "浏览器不下载模型时如何生成文档向量？",
+    "expectedSource": "edge-ai-notes.txt"
+  },
+  {
+    "query": "重复导入同一个文件会发生什么？",
+    "expectedSource": "TECHNICAL_NOTE.md"
+  },
+  {
+    "query": "如何让刚写入的数据立即可搜索？",
+    "expectedSource": "seekdb-overview.md"
+  }
+]

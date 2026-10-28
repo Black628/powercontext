@@ -1,0 +1,7 @@
+远程 embedding API 把模型调用放在服务端。与浏览器下载模型相比，它可以避免用户首次加载模型，并由 Node API 统一管理 Qwen 请求。
+
+Qwen embedding API 返回固定维度的向量，文档和查询必须使用同一个模型，seekdb collection 的向量维度也必须与模型保持一致。
+
+embedding 请求可以按批次发送多个文本，服务端会记录每次请求耗时，并在写入 seekdb 前验证向量维度和数值有效性。
+
+浏览器只负责读取文件、分块和展示进度；原文先发送到本机 Node API，再由服务端调用 Qwen 并把向量写入 seekdb。
