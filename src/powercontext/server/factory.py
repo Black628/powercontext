@@ -43,6 +43,12 @@ from powercontext.builtin.authz import (
     access_control_for_mode,
 )
 from powercontext.builtin.authz.composition import open_builtin_access_control
+from powercontext.builtin.authz.owner_recovery import (
+    OwnerRecovery,
+    flush_owner_writes,
+    owner_recovery_session,
+    owner_write_access,
+)
 from powercontext.builtin.authz.repository import RelationalAccessRepository
 from powercontext.builtin.dream.generation import DreamGenerator
 from powercontext.builtin.inference import EmbeddingModel
@@ -266,6 +272,15 @@ def create_server_app(  # noqa: C901
                     ),
                 )
             )
+            if (
+                active_access_control is not None
+                and runtime.owner_write_database is not None
+                and not active_access_control.supports_write_transaction(runtime.owner_write_database.engine)
+            ):
+                recovery = OwnerRecovery(runtime.owner_write_database, active_access_control)
+                await recovery.initialize()
+                app.state.owner_recovery = recovery
+                await resources.enter_async_context(recovery.monitor())
             identity_repository = ServerIdentityRepository(runtime.primary_database)
             await identity_repository.initialize()
             server_id = await identity_repository.load_or_create()
@@ -313,6 +328,7 @@ def create_server_app(  # noqa: C901
                 app.state.capability_provider = None
                 app.state.access_control = configured_access_control
                 app.state.authentication_provider = configured_authentication
+                app.state.owner_recovery = None
                 app.state.server_info = None
                 app.state.capabilities = Capabilities(
                     source_types=[],
@@ -463,8 +479,8 @@ def _scheduled_profile_runner(settings, access, *, enabled, legacy_static_princi
                 await access.require(principal, AccessAction.ARTIFACT_WRITE, resource, context=context)
 
         async def on_commit(connection, artifact, candidate):
-            bound = access.with_connection(connection)
-            if artifact is not None and await bound.artifact_owner(resource) is None:
+            bound = owner_write_access(access, connection)
+            if artifact is not None and await access.for_read(connection).artifact_owner(resource) is None:
                 await bound.establish_artifact_owner(
                     resource,
                     principal,
@@ -481,9 +497,20 @@ def _scheduled_profile_runner(settings, access, *, enabled, legacy_static_princi
                     idempotency_key=f"candidate-owner:{scope_id}:{candidate.candidate_id}",
                 )
 
-        return await profiles.flush(
-            scope_id, high_watermark=high, authorize_snapshot=authorize_snapshot, on_commit=on_commit
+        recovery = (
+            None
+            if access.supports_write_transaction(profiles.database.engine)
+            else OwnerRecovery(profiles.database, access)
         )
+        async with owner_recovery_session(recovery):
+            result = await profiles.flush(
+                scope_id, high_watermark=high, authorize_snapshot=authorize_snapshot, on_commit=on_commit
+            )
+            await flush_owner_writes(
+                artifact=resource,
+                candidate=None if result.candidate_id is None else (scope_id, result.candidate_id),
+            )
+            return result
 
     return run
 

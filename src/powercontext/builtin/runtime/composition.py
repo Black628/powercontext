@@ -902,7 +902,11 @@ async def open_builtin_runtime(  # noqa: C901
         if config.handoff_report.enabled:
             runtime.handoff_report = HandoffReportApplication(
                 contexts.scopes,
-                RuntimeHandoffReadAdapter(runtime.handoff),
+                RuntimeHandoffReadAdapter(
+                    contexts.database,
+                    contexts.repositories.artifacts,
+                    contexts.handoff_artifact_id,
+                ),
             )
         if config.runtime.memory_rerank_enabled and configured_reranker is None:
             raise BuiltinConfigurationError("memory-reranker")
