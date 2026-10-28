@@ -79,6 +79,25 @@ class _SlowQueryEmbedding:
         return EmbeddingResult(vectors=tuple((value, math.sqrt(1.0 - value**2)) for value in similarities))
 
 
+class _TimedQueryEmbedding:
+    """Embed entries at once and record how long each query embedding is waited for before it is abandoned."""
+
+    profile = _PROFILE
+
+    def __init__(self, delay: float) -> None:
+        self.delay = delay
+        self.waits: list[float] = []
+
+    async def embed(self, texts: tuple[str, ...], /) -> EmbeddingResult:
+        if any(text == _QUERY for text in texts):
+            started = asyncio.get_running_loop().time()
+            try:
+                await asyncio.sleep(self.delay)
+            finally:
+                self.waits.append(asyncio.get_running_loop().time() - started)
+        return EmbeddingResult(vectors=tuple((0.3, math.sqrt(1.0 - 0.3**2)) for _ in texts))
+
+
 @asynccontextmanager
 async def _runtime(database: Path, budget: float, embedding: Any) -> AsyncIterator[BuiltinRuntime]:
     config = BuiltinConfig(
