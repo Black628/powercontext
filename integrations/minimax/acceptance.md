@@ -2,7 +2,7 @@
 
 ## Environment
 
-- Date: 2026-10-23.
+- Date: 2026-10-28.
 - Platform: Linux x86_64.
 - Node.js: 22.23.3.
 - Host: official npm `@minimax-ai/code@0.6.9`, installed into an isolated temporary prefix.
@@ -28,7 +28,16 @@ Native discovery runs in a disposable profile containing the installed package a
 
 The disabled-private scenarios configure the incoming package to use an anonymous loopback Server while retaining a disabled private HTTPS endpoint. First and repeated setup preserve every byte of the private file, including a dormant credential when present. Real native discovery and CLI Server probes succeed against the bundled endpoint, and doctor leaves the file unchanged.
 
-The native tool scenarios run `mcode exec` with a local OpenAI-compatible inference fixture. MiniMax discovers the installed Skill and invokes PowerContext `list_scopes` over authenticated MCP, either directly or through `tool_search` and `mcp_invoke`. The two cases select the private connection and the separately named plugin connection (`powercontext_2`); both return the scope title seeded in the selected Server. This verifies synchronized endpoint/authorization settings through both native tool paths. It uses controlled inference, not an external model provider.
+The native tool scenarios first verify that setup synchronized the private and installed plugin MCP URLs and Authorization headers. Each case then isolates one connection before running `mcode exec` with a local OpenAI-compatible inference fixture:
+
+| Case | Private MCP configuration | Native plugin state |
+| --- | --- | --- |
+| `private-mcp` | Retain the enabled `powercontext` entry | Disable `powercontext@local` through the real CLI |
+| `plugin-mcp` | Remove the `powercontext` entry from the temporary profile | Keep `powercontext@local` enabled |
+
+The real plugin list must confirm the expected enablement state. The inference fixture selects the single discovered `list_scopes` tool, either directly or through `tool_search` and `mcp_invoke`. Missing or ambiguous tools fail qualification. Tool aliases are not used to identify the route; both isolated cases exposed `mcp__powercontext__list_scopes` in this run.
+
+Both cases return the seeded Scope ID and title in the result associated with the emitted MCP tool-call ID. The result parser accepts MiniMax's concatenated MCP text blocks. The plugin case also verifies that the installed Skill reaches the model; the private case does not require a Skill from its disabled plugin. This establishes authenticated MCP calls through each isolated native path using controlled inference, without an external model provider.
 
 The package and connection checks use actual files, subprocesses, HTTP requests, and SQLite. Unit tests in `tests/test_cli_minimax.py` separately use simulated CLI output to cover parsing failures and installation recovery; those simulations are not native qualification.
 

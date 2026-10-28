@@ -237,18 +237,27 @@ def _objects(value):
             yield from _objects(child)
     elif isinstance(value, str):
         try:
-            decoded = json.loads(value)
+            # MiniMax can append another MCP text block after the first JSON value.
+            decoded, _ = json.JSONDecoder().raw_decode(value.lstrip())
         except ValueError:
             return
         yield from _objects(decoded)
 
 
 class ModelGateway(ThreadingHTTPServer):
-    def __init__(self, *, plugin_connection=False):
+    def __init__(self):
         super().__init__(("127.0.0.1", 0), ModelHandler)
         self.requests: list[dict[str, Any]] = []
-        self.plugin_connection = plugin_connection
         self.invoked_tools: list[str] = []
+        self.scope_call_ids: set[str] = set()
+        self.errors: list[str] = []
+
+    def scope_tool(self, names):
+        matches = sorted({name for name in names if name.endswith("list_scopes")})
+        if len(matches) != 1:
+            self.errors.append(f"Expected one isolated list_scopes tool, discovered {matches!r}; tools={names!r}")
+            return None
+        return matches[0]
 
 
 class ModelHandler(BaseHTTPRequestHandler):
@@ -259,42 +268,35 @@ class ModelHandler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        # Provider negotiation also probes formats this controlled endpoint does not implement.
+        if "messages" not in body:
+            self.send_error(404, "Only OpenAI chat completions are supported")
+            return
         self.server.requests.append(body)
         messages = body["messages"]
         tool_results = [message for message in messages if message["role"] == "tool"]
         names = [tool["function"]["name"] for tool in body.get("tools", [])]
         selected = None
         arguments = {}
+        call_id = f"call-{len(tool_results)}"
         if not tool_results and "tool_search" in names:
             selected = "tool_search"
             arguments = {"query": "list_scopes", "top_k": 20}
         elif tool_results and len(tool_results) == 1 and "mcp_invoke" in names:
-            match = next(
-                (
-                    item["name"]
-                    for item in _objects(tool_results[0]["content"])
-                    if isinstance(item.get("name"), str)
-                    and "list_scopes" in item["name"]
-                    and (not self.server.plugin_connection or "powercontext_2" in item["name"])
-                ),
-                None,
-            )
+            match = self.server.scope_tool([
+                item["name"] for item in _objects(tool_results[0]["content"]) if isinstance(item.get("name"), str)
+            ])
             if match:
                 selected = "mcp_invoke"
                 arguments = {"tool_name": match, "arguments": {"limit": 10}}
                 self.server.invoked_tools.append(match)
-        elif not tool_results:
-            selected = next(
-                (
-                    name
-                    for name in names
-                    if "list_scopes" in name and (not self.server.plugin_connection or "powercontext_2" in name)
-                ),
-                None,
-            )
+                self.server.scope_call_ids.add(call_id)
+        elif not tool_results and names:
+            selected = self.server.scope_tool(names)
             arguments = {"limit": 10}
             if selected:
                 self.server.invoked_tools.append(selected)
+                self.server.scope_call_ids.add(call_id)
         delta: dict[str, Any] = {"content": "MINIMAX_MCP_ACCEPTANCE_OK"}
         finish = "stop"
         if selected:
@@ -302,7 +304,7 @@ class ModelHandler(BaseHTTPRequestHandler):
                 "tool_calls": [
                     {
                         "index": 0,
-                        "id": f"call-{len(tool_results)}",
+                        "id": call_id,
                         "type": "function",
                         "function": {"name": selected, "arguments": json.dumps(arguments)},
                     }
@@ -371,6 +373,44 @@ def test_real_host_invokes_powercontext_mcp_with_controlled_inference(host, plug
         "--json",
     )
     assert result.exit_code == 0, result.output
+    environment = dict(os.environ, MINIMAX_DATA_DIR=str(data), MCODE_PROVIDER_API_KEY="synthetic-model-token")
+    private_path = data / "mcp.json"
+    private = json.loads(private_path.read_bytes())
+    private_entry = private["mcpServers"]["powercontext"]
+    bundle = json.loads((data / "plugins/powercontext/powercontext.mcp.json").read_bytes())
+    bundle_entry = bundle["mcpServers"]["powercontext"]
+    assert private_entry["url"] == bundle_entry["url"] == endpoint + "/mcp"
+    assert private_entry["headers"] == bundle_entry["headers"] == {"Authorization": "Bearer acceptance-only-token"}
+    if plugin_connection:
+        del private["mcpServers"]["powercontext"]
+        private_path.write_text(json.dumps(private), encoding="utf-8")
+        assert "powercontext" not in json.loads(private_path.read_bytes())["mcpServers"]
+    else:
+        disabled = subprocess.run(
+            [COMMAND, "plugin", "disable", "powercontext@local", "--json"],
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+        assert disabled.returncode == 0, disabled.stdout + disabled.stderr
+        assert private_entry.get("enabled", True) is True
+    discovered = subprocess.run(
+        [COMMAND, "plugin", "list", "--json"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    assert discovered.returncode == 0, discovered.stdout + discovered.stderr
+    plugins = [
+        item
+        for item in json.loads(discovered.stdout)["installed"]
+        if item["name"] == "powercontext" and item["marketplaceName"] == "local"
+    ]
+    assert len(plugins) == 1 and plugins[0]["enabled"] is plugin_connection, discovered.stdout
     marker = "MiniMax native MCP scope evidence"
     with httpx.Client(
         base_url=endpoint, headers={"Authorization": "Bearer acceptance-only-token"}, timeout=10
@@ -380,10 +420,10 @@ def test_real_host_invokes_powercontext_mcp_with_controlled_inference(host, plug
             json={"title": marker, "summary": "Isolated native MCP acceptance", "idempotency_key": "minimax-scope"},
         )
         assert response.status_code == 201, response.text
-    gateway = ModelGateway(plugin_connection=plugin_connection)
+        scope_id = response.json()["scope_id"]
+    gateway = ModelGateway()
     thread = threading.Thread(target=gateway.serve_forever, daemon=True)
     thread.start()
-    environment = dict(os.environ, MINIMAX_DATA_DIR=str(data), MCODE_PROVIDER_API_KEY="synthetic-model-token")
     try:
         added = subprocess.run(
             [
@@ -430,17 +470,21 @@ def test_real_host_invokes_powercontext_mcp_with_controlled_inference(host, plug
             check=False,
         )
         assert executed.returncode == 0, executed.stdout + executed.stderr
+        assert not gateway.errors, gateway.errors
         observed = [
             message
             for request in gateway.requests
             for message in request.get("messages", [])
-            if message["role"] == "tool"
+            if message["role"] == "tool" and message.get("tool_call_id") in gateway.scope_call_ids
         ]
-        assert any(marker in json.dumps(message, ensure_ascii=False) for message in observed), executed.stdout
-        assert any("powercontext-project-context" in json.dumps(request) for request in gateway.requests)
-        assert gateway.invoked_tools
+        assert any(
+            item.get("scope_id") == scope_id and item.get("title") == marker
+            for message in observed
+            for item in _objects(message["content"])
+        ), {"stdout": executed.stdout, "stderr": executed.stderr, "tools": gateway.invoked_tools, "results": observed}
+        assert len(set(gateway.invoked_tools)) == 1, gateway.invoked_tools
         if plugin_connection:
-            assert any("powercontext_2" in name for name in gateway.invoked_tools)
+            assert any("powercontext-project-context" in json.dumps(request) for request in gateway.requests)
     finally:
         gateway.shutdown()
         gateway.server_close()
