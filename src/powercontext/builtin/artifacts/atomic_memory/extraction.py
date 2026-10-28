@@ -60,6 +60,12 @@ A language difference alone is not a factual correction and does not authorize r
 """.strip()
 
 
+def atomic_memory_extraction_instructions_version(profile: MemoryExtractionProfile) -> str:
+    """Return the stable built-in instruction identity for one extraction profile."""
+
+    return f"powercontext.atomic-memory.extract.{profile.value}.v2"
+
+
 def atomic_memory_extraction_instructions(profile: MemoryExtractionProfile) -> str:
     selection = (
         "Keep durable preferences, decisions, constraints, expensive-to-rediscover facts and unfinished progress. "
