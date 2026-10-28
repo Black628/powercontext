@@ -40,9 +40,9 @@ from tests.release_upgrades.test_full_server import environment_for
 
 @pytest.fixture
 def release(tmp_path, monkeypatch):
-    # Do not inherit the workflow's pinned release checkout.
+    # Disposable release fixtures own their checkout identity, independently of CI.
     monkeypatch.delenv("PC_UPGRADE_SOURCE_SHA", raising=False)
-    monkeypatch.setenv("GITHUB_SHA", "fixture-commit")
+    monkeypatch.delenv("GITHUB_SHA", raising=False)
     persistence = tmp_path / "src/powercontext/builtin/persistence/tables.py"
     persistence.parent.mkdir(parents=True)
     persistence.write_text("# disposable persistence input\n")
@@ -925,6 +925,8 @@ def parallel_reports(release, monkeypatch, request):
     dist = root / "dist"
     dist.mkdir()
     shutil.copyfile(wheel, dist / wheel.name)
+    # Model an unpinned checkout even inside the upgrade workflow, which exports PC_UPGRADE_SOURCE_SHA.
+    monkeypatch.delenv("PC_UPGRADE_SOURCE_SHA", raising=False)
     prepared = root / "prepared"
     scheduled = parallel.prepare(root, dist, prepared, release=False, release_notes=None, selection=selection)
     executed = []
