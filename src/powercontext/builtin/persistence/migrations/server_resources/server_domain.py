@@ -168,17 +168,12 @@ def validate(connection, *, configuration):
         "SELECT scope_id,binding_name FROM pc_artifact_processing_intents"
     ):
         finish(ArtifactProcessingIntentRepository().load(pinned(connection), scope, binding))
-    from powercontext.builtin.persistence.atomic_memory_evidence_schema import ATOMIC_MEMORY_EVIDENCE_TABLES
     from powercontext.builtin.persistence.oceanbase.atomic_memory_index import OceanBaseAtomicMemoryIndex
     from powercontext.builtin.persistence.sqlite.atomic_memory_index import SQLiteAtomicMemoryIndex
     from powercontext.builtin.runtime.atomic_memory_rebuild import verify_atomic_memory_current
 
     atomic_index = SQLiteAtomicMemoryIndex() if connection.dialect.name == "sqlite" else OceanBaseAtomicMemoryIndex()
-    # The evidence tables arrive with their own later revision; before it exists no
-    # historical revision can carry a declaration to verify.
-    tables = set(inspect(connection).get_table_names())
-    require_evidence = all(table.name in tables for table in ATOMIC_MEMORY_EVIDENCE_TABLES)
-    report = finish(verify_atomic_memory_current(pinned(connection), atomic_index, require_evidence=require_evidence))
+    report = finish(verify_atomic_memory_current(pinned(connection), atomic_index))
     if not report.ready:
         raise MigrationError(
             "projection_verification_failed", "Atomic Memory projections differ from their authoritative records."

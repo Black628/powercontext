@@ -228,13 +228,14 @@ async def verify_atomic_memory_current(
     *,
     batch_size: int = 100,
     sources: SourceRepository | None = None,
-    require_evidence: bool = True,
+    require_evidence: bool = False,
 ) -> AtomicMemoryProjectionRebuildReport:
-    """Check current projections and every exact revision's retained evidence without taking business row locks.
+    """Check current projections and optionally each exact revision's retained evidence without business row locks.
 
     The caller owns a consistent read snapshot or an exclusive maintenance
-    transaction, including for identities created after migration. ``require_evidence``
-    is false only while an upgrade has not yet created the evidence tables.
+    transaction, including for identities created after migration. Frozen
+    pre-evidence migrations retain projection-only validation; current maintenance
+    and rebuild operations explicitly require evidence verification.
     """
 
     if isinstance(batch_size, bool) or not 1 <= batch_size <= 1000:
@@ -324,7 +325,7 @@ async def rebuild_atomic_memory_current(
                 await publisher.remove(connection, scope_id, artifact_id)
             after = scope_id, artifact_id
     await connection.execute(index.table.delete().where(_obsolete_current(index)))
-    return await verify_atomic_memory_current(connection, index, batch_size=batch_size)
+    return await verify_atomic_memory_current(connection, index, batch_size=batch_size, require_evidence=True)
 
 
 async def rebuild_atomic_memory_projection(
@@ -403,7 +404,9 @@ async def rebuild_atomic_memory_projection(
         )
         await connection.execute(index.table.delete().where(_obsolete_current(index)))
         removed += obsolete
-        report = await verify_atomic_memory_current(connection, index, batch_size=batch_size, sources=sources)
+        report = await verify_atomic_memory_current(
+            connection, index, batch_size=batch_size, sources=sources, require_evidence=True
+        )
     return report.model_copy(
         update={
             "counts": {

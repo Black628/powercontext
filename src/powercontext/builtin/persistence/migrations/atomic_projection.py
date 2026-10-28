@@ -90,7 +90,7 @@ class AtomicProjectionMigrationRunner(ManagedMaintenanceRunner):
         try:
             report = finish(
                 atomic_memory_rebuild.verify_atomic_memory_current(
-                    pinned(connection), index, batch_size=self.batch_size
+                    pinned(connection), index, batch_size=self.batch_size, require_evidence=True
                 )
             )
         except Exception as error:

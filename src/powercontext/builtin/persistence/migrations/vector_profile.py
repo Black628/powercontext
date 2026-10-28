@@ -80,9 +80,14 @@ class ServerVectorProfile:
             layouts["s1402"] = layouts["s1401"] + [
                 ["table", "pc_portable_restore_receipts", "pc_portable_restore_receipts", receipt]
             ]
+        if "v1_4_1_004" in manifest["revision_resources"]:
+            owner = json.loads((directory / "schemas/sqlite-v1_4_1_004.json").read_text(encoding="utf-8"))["create"]
+            layouts["v1_4_1_004"] = layouts["s1402"] + [
+                ["table", "pc_access_owner_recovery", "pc_access_owner_recovery", owner]
+            ]
         if "v1_5_0_001" in manifest["revision_resources"]:
             evidence = json.loads((directory / "schemas/sqlite-v1_5_0_001.json").read_text(encoding="utf-8"))["create"]
-            layouts["v1_5_0_001"] = layouts["s1402"] + [
+            layouts["v1_5_0_001"] = layouts["v1_4_1_004"] + [
                 ["table", name, name, statement] for statement in evidence if (name := _created_table(statement))
             ]
         for entries in layouts.values():
