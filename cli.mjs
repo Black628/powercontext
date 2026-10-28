@@ -1,0 +1,2 @@
+import {ingest,context,save} from './context.mjs';
+try{const cmd=process.argv[2];let result;if(cmd==='ingest')result=await ingest();else if(cmd==='context')result=await context();else if(cmd==='save')result=await save(JSON.parse(process.argv[3]));else throw Error('Usage: node --env-file=.env cli.mjs ingest|context|save JSON');console.log(JSON.stringify(result??{ok:true},null,2));}catch(e){console.error(e.message);process.exitCode=1;}

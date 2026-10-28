@@ -1,0 +1,17 @@
+import {context,root,log,sha} from './context.mjs';
+import {readFile,writeFile} from 'node:fs/promises';
+import path from 'node:path';
+if(!process.env.MINIMAX_API_KEY)throw Error('MINIMAX_API_KEY required; no fake provider fallback');
+const ctx=await context();
+const file=path.join(root,'business/orders.mjs');const before=await readFile(file,'utf8');
+const messages=[{role:'system',content:'Modify only business/orders.mjs to satisfy the task and all provided specs/tests. Return only complete JavaScript file content, without markdown or explanations. Do not change tests.'},{role:'user',content:JSON.stringify(ctx)}];
+const request={model:process.env.MINIMAX_MODEL??'MiniMax-M2.5',messages,reasoning_split:true};
+const r=await fetch((process.env.MINIMAX_BASE_URL??'https://api.minimax.io/v1')+'/chat/completions',{method:'POST',headers:{Authorization:'Bearer '+process.env.MINIMAX_API_KEY,'Content-Type':'application/json'},body:JSON.stringify(request),signal:AbortSignal.timeout(180000)});
+if(!r.ok)throw Error('MiniMax HTTP '+r.status);
+const response=await r.json();
+if(response.base_resp?.status_code)throw Error('MiniMax API error '+response.base_resp.status_code+': '+response.base_resp.status_msg);
+const raw=response.choices?.[0]?.message?.content??'';
+const content=raw.replace(/<think>[\s\S]*?<\/think>/g,'').trim().replace(/^```(?:javascript|js)?\s*\n([\s\S]*?)\n```$/,'$1');
+if(!content||!content.includes('export function listOrders')||content.includes('```')||content.includes('<think>'))throw Error('Model output is not a source file; final content length='+content.length);
+await log('minimax.jsonl',{request,response:{id:response.id,model:response.model,usage:response.usage,content},before,after:content,before_sha:sha(before),after_sha:sha(content)});
+await writeFile(file,content);console.log('MiniMax source saved; run verify.mjs');

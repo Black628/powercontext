@@ -1,0 +1,1 @@
+{"id":"orders-status","description":"Implement exact status filtering in listOrders. Preserve order, default behavior and input immutability.","sources":["specs/orders.md","business/orders.mjs","tests/feature.test.mjs","tests/regression.test.mjs"]}
