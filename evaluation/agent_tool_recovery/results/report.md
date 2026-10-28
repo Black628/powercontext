@@ -39,9 +39,10 @@ the declared failure, for example by re-reading a Candidate before approving it.
 | `mcp-family-rejected` | stopped correctly ×3, not triggered ×3 | asked user ×2, stopped correctly ×1, not triggered ×3 | stopped correctly ×3, not triggered ×3 | stopped correctly ×3, not triggered ×3 |
 
 Retry behavior per host, as unchanged repeats / retries after a change / retry-later resends / terminal stops.
-Retries after a change count the case's declared operation only. A retry-later resend is an unchanged repeat
-that the case allows; a terminal stop is a session that neither retried nor wrote after its declared terminal
-failure.
+Retries after a change and retry-later resends answer the case's declared operation and error code. Corrections
+after unplanned errors remain in the remediation evidence for those errors. A retry-later resend has unchanged
+arguments, including excess attempts flagged by the outcome; a terminal stop is a session that neither retried
+nor wrote after its declared terminal failure.
 
 | Case | `claude-code` | `claude-code-plugin` | `codex` | `codex-plugin` |
 | --- | --- | --- | --- | --- |
@@ -52,7 +53,7 @@ failure.
 | `stale-candidate-approval` | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 |
 | `generation-unavailable` | 0 / 0 / 0 / 3 | 0 / 0 / 0 / 3 | 0 / 0 / 0 / 3 | 0 / 0 / 0 / 3 |
 | `permission-denied` | 0 / 0 / 0 / 3 | 0 / 0 / 0 / 3 | 0 / 0 / 0 / 3 | – |
-| `dream-capacity` | 0 / 3 / 0 / 0 | 2 / 2 / 2 / 0 | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 |
+| `dream-capacity` | 0 / 0 / 0 / 0 | 2 / 0 / 2 / 0 | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 |
 | `mcp-family-rejected` | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 |
 
 **No failed result states a retry disposition.** 99 of 99 failed results of PowerContext calls said

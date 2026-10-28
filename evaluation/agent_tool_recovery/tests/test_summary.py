@@ -23,7 +23,7 @@ from typing import Any
 
 import pytest
 
-from ..report import outcome, turn_rows
+from ..report import SCORING_VERSION, outcome, turn_rows
 from ..summary import retry_counts, summarize
 from ..transcript import ToolCall, ToolResult, Turn
 
@@ -69,6 +69,7 @@ def report(*, violations: list[str], transcript: str, host: str = "claude-code")
         "seconds_first_failure_to_terminal": 2.0,
     }
     return {
+        "scoring_version": SCORING_VERSION,
         "case_id": "permission-denied",
         "status": "complete",
         "evidence": "real_server",
@@ -296,7 +297,7 @@ def search(call_id: str, query: str, issued: int, answered: int, *, error: bool 
     )
 
 
-SEARCH_EXPECTED = {"error_code": "search_unavailable", "retry_disposition": "retry_later"}
+SEARCH_EXPECTED = {"error_code": "search_unavailable", "retry_disposition": "retry_later", "max_identical_retries": 1}
 
 
 def scored(*calls: ToolCall) -> dict[str, Any]:
@@ -360,10 +361,49 @@ def test_a_success_retires_the_failure_for_retry_flags_and_their_allowance() -> 
     assert evidence(*calls) == {"repeated_calls": 0, "retries_after_change": 1}
 
 
+def test_unplanned_error_codes_do_not_consume_the_cases_retry_allowance_or_evidence(tmp_path: Path) -> None:
+    unplanned = search("t1", "q", 1, 2)
+    unplanned.result = ToolResult(True, "HTTP error 422: Invalid - {'error': {'code': 'invalid_request'}}", START)
+    turn = scored(
+        unplanned, search("t2", "q", 3, 4, error=False), search("t3", "q", 5, 6), search("t4", "q", 7, 8, error=False)
+    )
+    case = {**CASE, "case_id": "search", "operation_id": "search_memory", "expected": SEARCH_EXPECTED}
+    result = {
+        **report(violations=[], transcript="a"),
+        "case_id": "search",
+        "turns": [turn],
+        "outcome": outcome([turn], expected=SEARCH_EXPECTED, final_state={}, state_violation=None),
+    }
+    run = write_run(tmp_path, [result])
+
+    summary, remediation = summarize([run], {"search": case})
+
+    assert result["outcome"]["structural"] == "recovered"
+    assert summary["cases"][0]["retry_behavior"]["retry_later_resends"] == 1
+    assert summary["cases"][0]["target_retries"] == 1
+    assert remediation == []
+    assert retry_counts([result], "search_memory", "search_unavailable") == {
+        "repeated_calls": 1,
+        "retries_after_change": 0,
+    }
+
+
 def test_reports_scored_before_failure_links_must_be_rescored(tmp_path: Path) -> None:
     stale = report(violations=["identical_retry"], transcript="a")
     for row in stale["turns"][0]["calls"]:
         del row["responds_to_failure"]
+
+    with pytest.raises(ValueError, match="rescore"):
+        summarize([write_run(tmp_path, [stale])], {"permission-denied": CASE})
+
+
+@pytest.mark.parametrize("version", [None, 0, SCORING_VERSION + 1])
+def test_reports_with_incompatible_retry_rules_must_be_rescored(tmp_path: Path, version: int | None) -> None:
+    stale = report(violations=[], transcript="a")
+    if version is None:
+        del stale["scoring_version"]
+    else:
+        stale["scoring_version"] = version
 
     with pytest.raises(ValueError, match="rescore"):
         summarize([write_run(tmp_path, [stale])], {"permission-denied": CASE})

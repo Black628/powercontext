@@ -25,10 +25,11 @@ import tempfile
 import threading
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from pathlib import Path
 from typing import Any, cast
 
@@ -61,9 +62,13 @@ from powercontext.server.context import is_internal_bridge
 from powercontext.server.factory import create_server_app
 from powercontext.server.settings import AccessControlConfig, McpConfig, ServerSettings
 
+from .environment import loopback_proxy_environment
+
 # A Server with model configuration needs more than 30 seconds to finish startup on Windows.
 STARTUP_SECONDS = 180
 DREAM_CONTRACT = {"X-PowerContext-Dream-Contract": "2"}
+# Harness MCP connections are loopback-only; retain MCP's connect and SSE read timeouts.
+LOOPBACK_MCP_HTTP_CLIENT = partial(httpx.AsyncClient, trust_env=False, timeout=httpx.Timeout(30.0, read=300.0))
 # Synthetic credentials that exist only inside the disposable access-profile Server.
 ADMIN = PrincipalRef(type="user", id="eval-admin")
 VIEWER = PrincipalRef(type="user", id="eval-viewer")
@@ -235,7 +240,9 @@ def _settings(profile: str, directory: Path, database_url: str, model_port: int 
 
 
 async def _catalog(mcp_url: str, headers: dict[str, str]) -> tuple[dict[str, Any], ...]:
-    async with Client(StreamableHttpTransport(mcp_url, headers=headers)) as client:
+    async with Client(
+        StreamableHttpTransport(mcp_url, headers=headers, httpx_client_factory=LOOPBACK_MCP_HTTP_CLIENT)
+    ) as client:
         tools = await client.list_tools()
     return tuple(
         sorted(
@@ -288,41 +295,42 @@ def canonical_sha256(value: object) -> str:
 def serve(profile: str) -> Iterator[EvalServer]:
     """Start one real Server with an isolated database and stop it with its data."""
 
-    directory = Path(tempfile.mkdtemp(prefix="powercontext-tool-recovery-"))
-    model_port, close_model = _blackhole() if profile == "dream" else (None, lambda: None)
-    database_url = f"sqlite+aiosqlite:///{(directory / 'eval.db').as_posix()}"
-    settings = _settings(profile, directory, database_url, model_port)
-    log = RequestLog()
-    app = create_server_app(
-        settings=settings,
-        middleware=(AsgiMiddleware(_RequestRecorder, log=log),),
-        authentication_provider=_TwoTokenAuthentication() if profile == "access" else None,
-    )
-    _record_mcp_calls(app, log)
-    listener = socket.socket()
-    listener.bind(("127.0.0.1", 0))
-    host, port = listener.getsockname()
-    server = uvicorn.Server(uvicorn.Config(app, log_level="warning", lifespan="on"))
-    thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
-    thread.start()
-    try:
-        deadline = time.monotonic() + STARTUP_SECONDS
-        while thread.is_alive() and not server.started and time.monotonic() < deadline:
-            time.sleep(0.05)
-        if not server.started:
-            raise RuntimeError("The evaluation Server did not start")  # noqa: TRY003
-        if profile == "access":
-            asyncio.run(_seed_admin(database_url))
-        host_headers = VIEWER_HEADERS if profile == "access" else {}
-        seed_headers = ADMIN_HEADERS if profile == "access" else {}
-        base_url = f"http://{host}:{port}"
-        catalog = asyncio.run(_catalog(f"{base_url}/mcp/", host_headers))
-        yield EvalServer(base_url, log, catalog, canonical_sha256(catalog), host_headers, seed_headers)
-    finally:
-        server.should_exit = True
-        thread.join(timeout=30)
-        close_model()
-        shutil.rmtree(directory, ignore_errors=True)
+    with loopback_proxy_environment() if profile == "dream" else nullcontext():
+        directory = Path(tempfile.mkdtemp(prefix="powercontext-tool-recovery-"))
+        model_port, close_model = _blackhole() if profile == "dream" else (None, lambda: None)
+        database_url = f"sqlite+aiosqlite:///{(directory / 'eval.db').as_posix()}"
+        settings = _settings(profile, directory, database_url, model_port)
+        log = RequestLog()
+        app = create_server_app(
+            settings=settings,
+            middleware=(AsgiMiddleware(_RequestRecorder, log=log),),
+            authentication_provider=_TwoTokenAuthentication() if profile == "access" else None,
+        )
+        _record_mcp_calls(app, log)
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        host, port = listener.getsockname()
+        server = uvicorn.Server(uvicorn.Config(app, log_level="warning", lifespan="on"))
+        thread = threading.Thread(target=server.run, kwargs={"sockets": [listener]}, daemon=True)
+        thread.start()
+        try:
+            deadline = time.monotonic() + STARTUP_SECONDS
+            while thread.is_alive() and not server.started and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if not server.started:
+                raise RuntimeError("The evaluation Server did not start")  # noqa: TRY003
+            if profile == "access":
+                asyncio.run(_seed_admin(database_url))
+            host_headers = VIEWER_HEADERS if profile == "access" else {}
+            seed_headers = ADMIN_HEADERS if profile == "access" else {}
+            base_url = f"http://{host}:{port}"
+            catalog = asyncio.run(_catalog(f"{base_url}/mcp/", host_headers))
+            yield EvalServer(base_url, log, catalog, canonical_sha256(catalog), host_headers, seed_headers)
+        finally:
+            server.should_exit = True
+            thread.join(timeout=30)
+            close_model()
+            shutil.rmtree(directory, ignore_errors=True)
 
 
 def _ok(response: httpx.Response) -> dict[str, Any]:
@@ -373,7 +381,7 @@ def _experience(http: httpx.Client, scope_id: str) -> dict[str, Any]:
 def seed(name: str, server: EvalServer) -> dict[str, Any]:  # noqa: C901
     """Create the case's starting state through public HTTP and return prompt placeholders."""
 
-    with httpx.Client(base_url=server.base_url, timeout=60, headers=server.seed_headers) as http:
+    with httpx.Client(base_url=server.base_url, timeout=60, headers=server.seed_headers, trust_env=False) as http:
         if name == "none":
             return {}
         scope_id = _scope(http)
@@ -485,7 +493,7 @@ def actions(server: EvalServer, placeholders: dict[str, Any]) -> dict[str, Calla
 
     def concurrent_atomic_write() -> None:
         path = f"/v1/scopes/{placeholders['scope_id']}/artifacts/atomic-memory/{placeholders['artifact_id']}"
-        with httpx.Client(base_url=server.base_url, timeout=60, headers=server.seed_headers) as http:
+        with httpx.Client(base_url=server.base_url, timeout=60, headers=server.seed_headers, trust_env=False) as http:
             current = http.get(path)
             current.raise_for_status()
             _ok(
@@ -504,7 +512,7 @@ def observe(name: str | None, server: EvalServer, placeholders: dict[str, Any]) 
 
     if name is None:
         return {}
-    with httpx.Client(base_url=server.base_url, timeout=60, headers=server.seed_headers) as http:
+    with httpx.Client(base_url=server.base_url, timeout=60, headers=server.seed_headers, trust_env=False) as http:
         if name == "scope_titles":
             titles = [item["title"] for item in _ok(http.get("/v1/scopes", params={"limit": 100}))["items"]]
             # Titles are caller content; only duplicate counts leave the Server.

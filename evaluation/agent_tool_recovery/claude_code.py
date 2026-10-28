@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .environment import loopback_proxy_settings
 from .transcript import read_claude_session as read_transcript
 
 HOST = "claude-code"
@@ -144,9 +145,8 @@ def child_environment(environ: dict[str, str] | None = None) -> dict[str, str]:
 
     source = os.environ if environ is None else environ
     env = {key: value for key, value in source.items() if not key.upper().startswith(SCRUBBED_PREFIXES)}
-    no_proxy = {item.strip() for item in env.get("NO_PROXY", "").split(",") if item.strip()}
     # The evaluation Server is loopback-only; a configured HTTPS proxy must not intercept MCP traffic.
-    env["NO_PROXY"] = ",".join(sorted(no_proxy | {"127.0.0.1", "localhost"}))
+    env.update(loopback_proxy_settings(env))
     # Load every MCP tool up front; deferred search would add a tool the evaluation does not expose.
     env["ENABLE_TOOL_SEARCH"] = "false"
     return env

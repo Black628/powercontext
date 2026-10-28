@@ -100,7 +100,7 @@ def _gateway(
     declared = {fault.operation_id: fault for fault in faults}
     remaining = {fault.operation_id: fault.count for fault in faults}
     lock = threading.Lock()
-    client = httpx.AsyncClient(timeout=None)  # noqa: S113 - SSE streams stay open for the session
+    client = httpx.AsyncClient(timeout=None, trust_env=False)  # noqa: S113 - SSE streams stay open for the session
 
     def take_fault(names: list[str]) -> Fault | None:
         with lock:

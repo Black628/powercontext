@@ -36,8 +36,8 @@ from fastmcp.client.transports import StreamableHttpTransport
 from . import claude_code, codex
 from .claude_code import PluginSession
 from .proxy import Fault, Gateway, GatewayEvent, intercept
-from .report import ERROR_CODE, HTTP_STATUS, bind_calls, content_of, leaks, outcome, turn_rows
-from .server import EvalServer, ServedRequest, actions, observe, seed, serve
+from .report import ERROR_CODE, HTTP_STATUS, SCORING_VERSION, bind_calls, content_of, leaks, outcome, turn_rows
+from .server import LOOPBACK_MCP_HTTP_CLIENT, EvalServer, ServedRequest, actions, observe, seed, serve
 from .summary import summarize
 from .transcript import TranscriptError
 
@@ -123,7 +123,9 @@ async def _scripted_call(
     url: str, headers: dict[str, str], name: str, arguments: dict[str, Any], *, structured: bool = False
 ) -> dict[str, Any]:
     try:
-        async with Client(StreamableHttpTransport(url, headers=headers)) as client:
+        async with Client(
+            StreamableHttpTransport(url, headers=headers, httpx_client_factory=LOOPBACK_MCP_HTTP_CLIENT)
+        ) as client:
             result = await client.call_tool(name, arguments, raise_on_error=False)
     except Exception as error:  # noqa: BLE001 - a transport failure is the observation
         return {"transport_error": type(error).__name__}
@@ -294,6 +296,7 @@ def score(case: dict[str, Any], private_dir: Path) -> dict[str, Any]:
     faults = faults_of(case)
     prompts = observation["prompts"]
     report: dict[str, Any] = {
+        "scoring_version": SCORING_VERSION,
         "case_id": case["case_id"],
         "failure_class": case["failure_class"],
         "evidence": EVIDENCE[faults[0].mode] if faults else "real_server",
@@ -352,7 +355,9 @@ def score(case: dict[str, Any], private_dir: Path) -> dict[str, Any]:
         found = leaks(report, content_of(turns, prompts))
         if found:
             # Never persist a leaking report; keep the private transcript for diagnosis and continue the run.
-            report = {key: report[key] for key in ("case_id", "failure_class", "host", "transcript_sha256")}
+            report = {
+                key: report[key] for key in ("scoring_version", "case_id", "failure_class", "host", "transcript_sha256")
+            }
             report.update(status="leak_blocked", leaked_items=len(found))
     write_json(private_dir / "report.json", report)
     return report

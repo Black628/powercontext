@@ -198,9 +198,10 @@
       "expected": {
         "http_status": 429,
         "error_code": "capacity_exceeded",
-        "retry_disposition": "retry_later"
+        "retry_disposition": "retry_later",
+        "max_identical_retries": 2
       },
-      "correct_behavior": "Retry a bounded number of times after waiting, or tell the user to retry later; never loop on immediate resends.",
+      "correct_behavior": "Wait before retrying, with at most two identical resends, or tell the user to retry later; never loop on immediate resends.",
       "preflight_arguments": {
         "scope_id": "{scope_id}",
         "operation": "refine_experience",
@@ -234,7 +235,8 @@
       "expected": {
         "http_status": null,
         "error_code": null,
-        "retry_disposition": "retry_later"
+        "retry_disposition": "retry_later",
+        "max_identical_retries": 1
       },
       "correct_behavior": "A read whose request never reached the Server may be retried once.",
       "preflight_arguments": {
@@ -264,6 +266,7 @@
         "http_status": null,
         "error_code": null,
         "retry_disposition": "retry_later",
+        "max_identical_retries": 1,
         "named_field": "idempotency_key",
         "named_field_must_repeat": true
       },

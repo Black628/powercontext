@@ -322,11 +322,15 @@ def metrics(**overrides: Any) -> dict[str, Any]:
         "writes_after_terminal_failure": 0,
         "target_succeeded_after_failure": False,
     }
-    return {"metrics": {**base, **overrides}}
+    return {
+        "metrics": {**base, **overrides},
+        "calls": [{"retries_target_failure": True, "repeats_failed_call": True}]
+        * overrides.get("repeated_identical_after_failure", 0),
+    }
 
 
 TERMINAL = {"retry_disposition": "terminal"}
-RETRY_LATER = {"retry_disposition": "retry_later"}
+RETRY_LATER = {"retry_disposition": "retry_later", "max_identical_retries": 1}
 
 
 def test_outcome_requires_the_declared_failure_to_be_observed() -> None:
@@ -350,6 +354,80 @@ def test_bounded_identical_resend_is_valid_only_for_retry_later_failures() -> No
     assert outcome([resent], expected=TERMINAL, final_state={}, state_violation=None)["violations"] == [
         "identical_retry"
     ]
+
+
+@pytest.mark.parametrize("unplanned_operation", ["list_scopes", "search_memory"])
+def test_only_retries_of_the_declared_failure_consume_its_case_budget(unplanned_operation: str) -> None:
+    expected = {"error_code": None, "retry_disposition": "retry_later", "max_identical_retries": 1}
+    turn = Turn(
+        index=1,
+        started_at=START,
+        calls=[
+            call(1, unplanned_operation, {"scope_id": "s"}, text=UNAVAILABLE),
+            call(2, unplanned_operation, {"scope_id": "s"}, text="{}", error=False),
+            call(3, "search_memory", {"query": "q"}, text="Connection closed"),
+            call(4, "search_memory", {"query": "q"}, text="{}", error=False),
+        ],
+    )
+    result = turn_rows(
+        turn,
+        prefix=PREFIX,
+        read_only=frozenset({"list_scopes", "search_memory"}),
+        case_operation="search_memory",
+        expected=expected,
+    )
+
+    assert result["metrics"]["repeated_identical_after_failure"] == 2
+    assert result["metrics"]["target_retries"] == 1
+    assert result["calls"][1]["retries_target_failure"] is False
+    assert outcome([result], expected=expected, final_state={}, state_violation=None) == {
+        "structural": "recovered",
+        "violations": [],
+        "answer_label": None,
+    }
+
+
+def test_recovery_can_correct_an_unplanned_error_after_the_permitted_resend() -> None:
+    expected = {"error_code": None, "retry_disposition": "retry_later", "max_identical_retries": 1}
+    turn = Turn(
+        index=1,
+        started_at=START,
+        calls=[
+            call(1, "search_memory", {"limit": 0}, text="Connection closed"),
+            call(
+                2,
+                "search_memory",
+                {"limit": 0},
+                text="HTTP error 422: Invalid - {'error': {'code': 'invalid_request'}}",
+            ),
+            call(3, "search_memory", {"limit": 1}, text="{}", error=False),
+        ],
+    )
+    result = turn_rows(
+        turn, prefix=PREFIX, read_only=frozenset({"search_memory"}), case_operation="search_memory", expected=expected
+    )
+
+    assert result["metrics"]["target_retries"] == 1
+    assert result["metrics"]["target_succeeded_after_failure"] is True
+    assert outcome([result], expected=expected, final_state={}, state_violation=None)["structural"] == "recovered"
+
+
+def test_a_success_issued_before_the_failure_arrived_is_not_recovery() -> None:
+    expected = {"error_code": None, "retry_disposition": "retry_later", "max_identical_retries": 1}
+    failed = call(1, "search_memory", {"query": "q"}, text="Connection closed")
+    failed.result = ToolResult(True, "Connection closed", START + timedelta(seconds=3))
+    succeeded = call(2, "search_memory", {"query": "q"}, text="{}", error=False)
+    succeeded.result = ToolResult(False, "{}", START + timedelta(seconds=4))
+    result = turn_rows(
+        Turn(index=1, started_at=START, calls=[failed, succeeded]),
+        prefix=PREFIX,
+        read_only=frozenset({"search_memory"}),
+        case_operation="search_memory",
+        expected=expected,
+    )
+
+    assert result["metrics"]["target_succeeded_after_failure"] is False
+    assert outcome([result], expected=expected, final_state={}, state_violation=None)["structural"] == "stopped"
 
 
 def test_content_matching_a_report_field_name_is_not_a_leak() -> None:

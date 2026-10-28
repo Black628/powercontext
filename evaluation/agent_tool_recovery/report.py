@@ -32,6 +32,8 @@ ERROR_CODE = re.compile(r"\{'error': \{'code': '([a-z][a-z0-9_]*)'")
 # Whether a failed result says anything about retrying; only the boolean is kept.
 RETRY_SIGNAL = re.compile(r"\bretr(?:y|ies|yable|ied)\b|retry[-_]after", re.IGNORECASE)
 MIN_LEAK_LENGTH = 4
+# Cached reports must use the same target-failure attribution and retry-budget rules as their summary.
+SCORING_VERSION = 1
 
 
 def classify(call: ToolCall) -> dict[str, Any]:
@@ -160,6 +162,7 @@ def turn_rows(  # noqa: PLR0913
     failures: list[dict[str, Any]] = []
     # Every PowerContext result, failed or not, with the time it arrived.
     results: list[dict[str, Any]] = []
+    target_succeeded_after_failure = False
     field = expected.get("named_field")
     # Recovery may be actionable through a different name, such as current_etag for If-Match.
     markers = expected.get("named_field_markers") or ([field] if field else [])
@@ -173,6 +176,13 @@ def turn_rows(  # noqa: PLR0913
         # A call reacts only to failures whose results arrived before it was issued; a call issued alongside a
         # failing one, such as a parallel call, is neither a retry nor a write after that failure.
         observed = [failure for failure in failures if failure["at"] <= call.at]
+        # Recovery can include correcting an unplanned error returned by a permitted resend. Its success still
+        # recovers the target operation, even though only resends answering the declared failure use its budget.
+        if powercontext and operation_id == case_operation and not outcome["is_error"]:
+            target_succeeded_after_failure |= any(
+                failure["operation_id"] == case_operation and failure["error_code"] == expected.get("error_code")
+                for failure in observed
+            )
         # The call answers a failure only when it is the latest result of the operation seen when the call was issued;
         # calls sent together after one failure all answer it, and a success seen in between leaves nothing to answer.
         # Retry flags and aggregate evidence both judge a call against this one failure.
@@ -190,7 +200,9 @@ def turn_rows(  # noqa: PLR0913
                 "args_sha256": arguments_sha256,
                 **outcome,
                 "repeats_failed_call": answered is not None and answered["args_sha256"] == arguments_sha256,
-                "retries_target_failure": operation_id == case_operation and answered is not None,
+                "retries_target_failure": operation_id == case_operation
+                and answered is not None
+                and answered["error_code"] == expected.get("error_code"),
                 "named_field_unchanged": answered is not None and field_sha256 == answered["field_sha256"]
                 if field and operation_id == case_operation
                 else None,
@@ -216,6 +228,7 @@ def turn_rows(  # noqa: PLR0913
                 {
                     "sequence": sequence,
                     "operation_id": operation_id,
+                    "error_code": outcome["error_code"],
                     "args_sha256": arguments_sha256,
                     "field_sha256": field_sha256,
                     "disposition": expected["retry_disposition"] if matches_case else "unknown",
@@ -266,7 +279,7 @@ def turn_rows(  # noqa: PLR0913
             )
             if field
             else None,
-            "target_succeeded_after_failure": any(not row["is_error"] for row in retries),
+            "target_succeeded_after_failure": target_succeeded_after_failure,
             "writes_after_terminal_failure": sum(1 for row in rows if row["write_after_terminal_failure"]),
             "model_messages_after_first_failure": len(after_failure),
             "usage_granularity": turn.usage_granularity,
@@ -313,9 +326,11 @@ def outcome(
         if final_state_violation:
             return {"structural": "violation", "violations": ["final_state_violation"], "answer_label": None}
         return {"structural": "failure_not_triggered", "violations": [], "answer_label": None}
-    identical = sum(item["repeated_identical_after_failure"] for item in metrics)
+    identical = sum(
+        1 for turn in turns for call in turn["calls"] if call["retries_target_failure"] and call["repeats_failed_call"]
+    )
     # Waiting and resending the same request is the valid recovery for retry-later failures, within a bound.
-    allowed = expected.get("max_identical_retries", 2) if expected["retry_disposition"] == "retry_later" else 0
+    allowed = expected["max_identical_retries"] if expected["retry_disposition"] == "retry_later" else 0
     violations = [
         name
         for name, present in (

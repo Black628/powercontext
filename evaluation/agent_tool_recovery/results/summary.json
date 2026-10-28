@@ -39,10 +39,10 @@
       "target_failures_reaching_server": 6,
       "target_failures_without_named_field": 0,
       "identical_retries": 0,
-      "target_retries": 3,
+      "target_retries": 0,
       "retry_behavior": {
         "unchanged_repeats": 0,
-        "retries_after_change": 3,
+        "retries_after_change": 0,
         "retry_later_resends": 0,
         "terminal_stops": 0
       },
@@ -89,10 +89,10 @@
       "target_failures_reaching_server": 7,
       "target_failures_without_named_field": 0,
       "identical_retries": 2,
-      "target_retries": 4,
+      "target_retries": 2,
       "retry_behavior": {
         "unchanged_repeats": 2,
-        "retries_after_change": 2,
+        "retries_after_change": 0,
         "retry_later_resends": 2,
         "terminal_stops": 0
       },

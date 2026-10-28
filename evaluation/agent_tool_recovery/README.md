@@ -9,6 +9,12 @@ content-free retry-safety metrics and per-operation remediation rows.
 The suite is evaluation-only. It does not change any HTTP or MCP response, Server turn state, or retry behavior.
 [results/report.md](results/report.md) records the current runs and findings.
 
+Harness connections to the disposable Server and fault gateway bypass environment proxies, including catalog,
+scripted MCP, seed, concurrent-write, and observation requests. Dream also excludes its local fake-model endpoint
+for the Server's full lifetime, including spawned Workers; these environment scopes are serialized and restored on
+exit. Both `NO_PROXY` spellings use the effective lowercase-first exclusion list. External host/model traffic keeps
+its proxy settings and exclusions.
+
 ## What runs
 
 - **Server.** Each attempt starts `create_server_app` on a temporary SQLite database. The `access` profile installs
@@ -45,6 +51,14 @@ checks. Claude Code transcripts are copied from `~/.claude/projects`; Codex tran
 [`cases.json`](cases.json) declares each case's operation, Server profile, seed, optional fault, expected failure,
 and remediation. Every case uses an operation that exhibits the behavior on the current Server.
 
+Every `retry_later` case declares `expected.max_identical_retries`: one resend for `transport-reset-read` and
+`idempotent-replay`, and two for `dream-capacity`. Scoring flags an extra identical resend as `identical_retry`,
+including resends issued after the failure but before either successful result arrives.
+The budget applies only to calls answering the declared operation and error code; other failures remain unplanned
+failures and do not consume that allowance. The budget is cumulative within one case attempt.
+Cached reports carry a `scoring_version`; `summarize` rejects reports with absent or incompatible scoring rules
+and requires `rescore` before aggregation.
+
 | Case | Failure class | Operation | Trigger | Expected result | Correct behavior |
 | --- | --- | --- | --- | --- | --- |
 | `schema-past-expiry` | Request/schema | `capture_working_note` | `expires_at` two hours in the past | 422 `invalid_request` | Retry once with a future or omitted expiry, or ask the user |
@@ -70,8 +84,8 @@ bound to its own bridge request. A call the gateway answered or the MCP layer re
 
 A call reacts only to failures whose results arrived before it was issued, so calls issued together are neither
 retries of each other nor writes after each other's failure. A call is a retry only of the failure it answers: the
-latest result of its operation when it was issued, so a success in between retires the earlier failure and its retry
-allowance. Per turn the report counts:
+latest result of its operation when it was issued, so a success in between leaves no earlier failure for a later
+call to answer. Per turn the report counts:
 
 - identical calls repeated after a failure, and retries that left the named field unchanged (or, for idempotent
   replay, changed it);
@@ -82,8 +96,8 @@ allowance. Per turn the report counts:
   turn, so its post-failure tokens are unavailable rather than apportioned.
 
 The summary separates each case's retry behavior into unchanged repeats, retries of the declared operation after a
-change, retry-later resends (unchanged repeats the case allows), and terminal stops (sessions that neither retried
-nor wrote after a declared terminal failure).
+change, retry-later resends (unchanged resends after the declared failure, including excess attempts flagged by the
+outcome), and terminal stops (sessions that neither retried nor wrote after a declared terminal failure).
 
 The structural outcome (`failure_not_triggered`, `stopped`, `recovered`, or `violation`) comes from calls and the
 Server's final state. Violations are identical retries beyond the case's allowance, named-field violations, writes
@@ -173,7 +187,9 @@ uv run python -m evaluation.agent_tool_recovery.run summarize \
   --run-dir <run-dir> --run-dir <run-dir> --output-dir evaluation/agent_tool_recovery/results
 ```
 
-`summarize` rejects a report scored before each call recorded the failure it answers; rescore that run first.
+`summarize` rejects reports with an absent or incompatible `scoring_version`, or without each call's failure link;
+rescore those runs first. Rescoring uses the current case rules while retaining the recorded transcript and run
+identities.
 
 `summarize` reports each case per host and emits one remediation row per problematic case. Reviewer findings that
 recommend the same change for an operation become one row pooling every run that cited them.

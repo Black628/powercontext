@@ -23,6 +23,8 @@ from pathlib import Path
 from statistics import median
 from typing import Any
 
+from .report import SCORING_VERSION
+
 ANSWER_LABELS = frozenset(
     {"recovered", "stopped_correctly", "asked_user", "claimed_success_incorrectly", "abandoned_retryable", "other"}
 )
@@ -39,6 +41,8 @@ def load_reports(run_dir: Path) -> list[dict[str, Any]]:
         if any("responds_to_failure" not in row for row in rows):
             message = f"{path} was scored before calls were linked to the failures they answer; rescore {run_dir} first"
             raise ValueError(message)
+        if report.get("scoring_version") != SCORING_VERSION:
+            raise ValueError(f"{path} uses incompatible scoring rules; rescore {run_dir} first")  # noqa: TRY003
         report["_answer_label"] = labels.get(f"{report['case_id']}/{path.parent.name}", "unreviewed")
         reports.append(report)
     return reports
@@ -60,8 +64,9 @@ def _median(values: list[float]) -> float | None:
 def _retry_behavior(case: dict[str, Any], reports: list[dict[str, Any]]) -> dict[str, int]:
     """Separate unchanged repeats, retries after a change, retry-later resends, and stops after a terminal failure.
 
-    A retry-later resend is an unchanged repeat of the declared operation that the case allows; terminal stops count
-    sessions whose declared terminal failure was followed by neither a retry nor a write.
+    A retry-later resend answers the case's declared retry-later failure with unchanged arguments, including an
+    attempt beyond its budget (flagged separately by the outcome). Terminal stops count sessions whose declared
+    terminal failure was followed by neither a retry nor a write.
     """
 
     rows = [row for report in reports for turn in report["turns"] for row in turn["calls"] if row["powercontext"]]
@@ -73,9 +78,7 @@ def _retry_behavior(case: dict[str, Any], reports: list[dict[str, Any]]) -> dict
             1 for row in rows if row["retries_target_failure"] and not row["repeats_failed_call"]
         ),
         "retry_later_resends": sum(
-            1
-            for row in rows
-            if retry_later and row["repeats_failed_call"] and row["operation_id"] == case["operation_id"]
+            1 for row in rows if retry_later and row["retries_target_failure"] and row["repeats_failed_call"]
         ),
         "terminal_stops": sum(
             1
