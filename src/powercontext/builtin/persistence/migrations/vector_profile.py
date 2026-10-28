@@ -81,8 +81,13 @@ class ServerVectorProfile:
                 ["table", "pc_portable_restore_receipts", "pc_portable_restore_receipts", receipt]
             ]
         if "v1_4_1_004" in manifest["revision_resources"]:
-            plugin = json.loads((directory / "schemas/sqlite-v1_4_1_004.json").read_text(encoding="utf-8"))["create"]
+            owner = json.loads((directory / "schemas/sqlite-v1_4_1_004.json").read_text(encoding="utf-8"))["create"]
             layouts["v1_4_1_004"] = layouts["s1402"] + [
+                ["table", "pc_access_owner_recovery", "pc_access_owner_recovery", owner]
+            ]
+        if "v1_4_1_005" in manifest["revision_resources"]:
+            plugin = json.loads((directory / "schemas/sqlite-v1_4_1_005.json").read_text(encoding="utf-8"))["create"]
+            layouts["v1_4_1_005"] = layouts["v1_4_1_004"] + [
                 ["table", "pc_source_write_plugins", "pc_source_write_plugins", plugin]
             ]
         for entries in layouts.values():

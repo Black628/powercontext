@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Register Source write plugins through the shared DDL executor."""
+"""Register durable external-owner intents through the shared DDL executor."""
 
 from alembic import context
 

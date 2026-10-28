@@ -214,6 +214,7 @@ exclude = [
     "evaluation/coding",
     "evaluation/artifact_evolution",
     "evaluation/memory/longmemeval_v2",
+    "evaluation/memory/capture_ownership",
     "evaluation/skills",
     "evaluation/zcode_guidance",
 ]
@@ -248,6 +249,10 @@ markers = [
 target-version = "py311"
 line-length = 120
 fix = true
+
+[tool.ruff.per-file-target-version]
+# Claude Code runs these hooks with the host's python3, often the macOS system Python 3.9.
+"integrations/claude-code/plugins/powercontext/**/*.py" = "py39"
 
 [tool.ruff.lint]
 select = [

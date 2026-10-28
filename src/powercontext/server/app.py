@@ -841,6 +841,12 @@ from powercontext.server.authz.models import (
     ROLE_SUBJECT_TYPES,
     HandoffReceiptIdentity,
 )
+from powercontext.server.authz.owner_recovery import (
+    flush_owner_writes,
+    owner_recovery_available,
+    owner_recovery_session,
+    owner_write_access,
+)
 from powercontext.server.authz.profiles import ARTIFACT_FAMILY_PROFILES, artifact_family_profile
 from powercontext.server.authz.service import _require_allowed
 from powercontext.server.context import (
@@ -1364,6 +1370,7 @@ def create_app(
     app.state.readiness_probe = readiness_probe
     app.state.access_control = access_control
     app.state.authentication_provider = authentication_provider
+    app.state.owner_recovery = None
     app.state.access_mode = (
         ("disabled" if access_control is None else access_control.mode) if access_mode is None else access_mode
     )
@@ -2222,9 +2229,11 @@ async def publish_artifact(
         nonlocal owner_committed
         if access is None:
             return
+        if principal is None:
+            raise AccessIdentityRequiredError
         target = publication.target
         if target.artifact.family != "topic-memory":
-            await access.with_connection(connection).establish_artifact_owner(
+            await owner_write_access(access, connection).establish_artifact_owner(
                 ResourceRef.artifact(
                     target.scope_id, family=target.artifact.family, artifact_id=target.artifact.artifact_id
                 ),
@@ -2245,6 +2254,7 @@ async def publish_artifact(
         ),
         **({"on_commit": on_commit} if access is not None else {}),
     )
+    await flush_owner_writes()
     if access is None and result.target.artifact.family != "topic-memory":
         await _establish_created_owner(
             http_request,
@@ -2258,16 +2268,13 @@ async def publish_artifact(
         )
     elif access is not None and not owner_committed and result.target.artifact.family != "topic-memory":
         target = result.target
-        if (
-            await access.artifact_owner(
-                ResourceRef.artifact(
-                    target.scope_id,
-                    family=target.artifact.family,
-                    artifact_id=target.artifact.artifact_id,
-                )
-            )
-            is None
-        ):
+        resource = ResourceRef.artifact(
+            target.scope_id,
+            family=target.artifact.family,
+            artifact_id=target.artifact.artifact_id,
+        )
+        await flush_owner_writes(artifact=resource)
+        if await access.artifact_owner(resource) is None:
             raise AccessUnavailableError("artifact_owner_pending")
     return TransportArtifactPublication.model_validate(result.model_dump(mode="json"))
 
@@ -2489,8 +2496,10 @@ async def flush_profile(
     async def on_commit(connection, artifact, candidate):
         if access is None:
             return
-        bound = access.with_connection(connection)
-        if artifact is not None and await bound.artifact_owner(resource) is None:
+        if principal is None:
+            raise AccessIdentityRequiredError
+        bound = owner_write_access(access, connection)
+        if artifact is not None and await access.for_read(connection).artifact_owner(resource) is None:
             await bound.establish_artifact_owner(
                 resource,
                 principal,
@@ -2509,6 +2518,10 @@ async def flush_profile(
 
     result = await application.profiles.flush(
         request.scope_id, authorize_snapshot=authorize_snapshot, on_commit=on_commit
+    )
+    await flush_owner_writes(
+        artifact=resource,
+        candidate=None if result.candidate_id is None else (request.scope_id, result.candidate_id),
     )
     return FlushProfileResponse.model_validate(result.model_dump(mode="json"))
 
@@ -3405,8 +3418,10 @@ async def commit_handoff(
         nonlocal committed
         if access is None:
             return
+        if principal is None:
+            raise AccessIdentityRequiredError
         if artifact.revision == 1:
-            await access.with_connection(connection).establish_artifact_owner(
+            await owner_write_access(access, connection).establish_artifact_owner(
                 ResourceRef.artifact(request.scope_id, family="handoff", artifact_id=artifact.artifact_id),
                 principal,
                 idempotency_key=f"handoff-owner:{request.scope_id}:{artifact.artifact_id}",
@@ -3418,6 +3433,7 @@ async def commit_handoff(
         mapping.runtime_prepared_handoff(request.handoff),
         **({"on_commit": on_commit} if access is not None else {}),
     )
+    await flush_owner_writes()
     if access is None and result.revision == 1:
         await _establish_created_owner(
             http_request,
@@ -3431,6 +3447,7 @@ async def commit_handoff(
         )
     elif access is not None and not committed:
         resource = ResourceRef.artifact(request.scope_id, family="handoff", artifact_id=result.artifact_id)
+        await flush_owner_writes(artifact=resource)
         if await access.artifact_owner(resource) is None:
             raise AccessUnavailableError("artifact_owner_pending")
     return mapping.committed_handoff_response(result)
@@ -4187,6 +4204,7 @@ async def _establish_base_artifact_owners(
     result: RuntimeArtifactCreated,
 ) -> None:
     if _transactional_owner_access(request) is not None:
+        await flush_owner_writes()
         return
     if result.family in {"topic-memory", "atomic-memory"}:
         return
@@ -4261,6 +4279,7 @@ async def _attest_candidate_owner(
     target: ArtifactRef | None,
 ) -> None:
     if _transactional_owner_access(request) is not None:
+        await flush_owner_writes()
         return
     access = access_control_for_mode(
         request.app.state.access_control,
@@ -4294,7 +4313,10 @@ def _transactional_owner_access(request: Request) -> AccessControlService | None
         access is not None
         and isinstance(runtime, BuiltinRuntime)
         and runtime.owner_write_database is not None
-        and access.supports_write_transaction(runtime.owner_write_database.engine)
+        and (
+            access.supports_write_transaction(runtime.owner_write_database.engine)
+            or owner_recovery_available(access, runtime.owner_write_database)
+        )
     ):
         return access
     return None
@@ -4309,7 +4331,7 @@ def _artifact_owner_commit(request: Request, scope_id: str, family: str) -> dict
 
     async def on_commit(connection, artifact):
         resource = ResourceRef.artifact(scope_id, family=family, artifact_id=artifact.artifact_id)
-        await access.with_connection(connection).establish_artifact_owner(
+        await owner_write_access(access, connection).establish_artifact_owner(
             resource, principal, idempotency_key=_base_owner_idempotency_key(resource), context=context
         )
 
@@ -4324,7 +4346,7 @@ def _candidate_owner_commit(request: Request, scope_id: str) -> dict[str, Any]:
 
     async def on_commit(connection, candidate):
         target = candidate.target
-        await access.with_connection(connection).attest_candidate_owner(
+        await owner_write_access(access, connection).attest_candidate_owner(
             scope_id=scope_id,
             candidate_id=candidate.candidate_id,
             family=candidate.family,
@@ -5455,7 +5477,10 @@ def _observe_application_operation(
         started_at = perf_counter()
         span = _start_application_span(app, operation)
         try:
-            async with _current_scope(app, operation, args, kwargs):
+            async with (
+                owner_recovery_session(app.state.owner_recovery),
+                _current_scope(app, operation, args, kwargs),
+            ):
                 result = await endpoint(*args, **kwargs)
         except asyncio.CancelledError:
             _observe_application(app, operation, "cancelled", started_at)
