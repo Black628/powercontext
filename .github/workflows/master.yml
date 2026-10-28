@@ -18,6 +18,7 @@ on:
           - full
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -26,6 +27,8 @@ concurrency:
 
 jobs:
   seekdb-managed-startup:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').upgrade) }}
     name: SeekDB managed startup regression (priority)
     timeout-minutes: 20
     runs-on: ubuntu-latest
@@ -80,31 +83,41 @@ jobs:
 
   changes:
     uses: ./.github/workflows/ci-changes.yml
+    with:
+      baseline-workflow: master.yml
 
   upgrade-acceptance:
-    needs: seekdb-managed-startup
-    # Collect selected upgrade cases even when the priority regression fails.
-    if: ${{ !cancelled() }}
+    needs: [changes, seekdb-managed-startup]
+    # Keep diagnostics when the selected priority regression fails.
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').upgrade) }}
     uses: ./.github/workflows/upgrade-release.yml
     with:
       selection: ${{ github.event_name == 'workflow_dispatch' && inputs.upgrade_selection || 'automatic' }}
 
   upgrade-release-gate:
     name: Upgrade release gate
-    needs: upgrade-acceptance
+    needs: [changes, upgrade-acceptance]
     if: always()
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Require the selected parallel acceptance workflow
         env:
+          SCOPE_RESULT: ${{ needs.changes.result }}
+          UPGRADE_SELECTED: ${{ fromJSON(needs.changes.outputs.suites || '{}').upgrade }}
           UPGRADE_RESULT: ${{ needs.upgrade-acceptance.result }}
-        run: test "$UPGRADE_RESULT" = success
+        run: |
+          if [ "$SCOPE_RESULT" = success ] && [ "$UPGRADE_SELECTED" = false ]; then
+            test "$UPGRADE_RESULT" = skipped
+            echo "Upgrade acceptance is not required by this change."
+          else
+            test "$UPGRADE_RESULT" = success
+          fi
 
   oceanbase-engine-recovery:
     name: OceanBase engine crash recovery
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').tests) }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').database) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     env:
@@ -247,7 +260,7 @@ jobs:
 
   isolated-installations:
     needs: changes
-    if: ${{ !cancelled() && (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').tests) }}
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').packaging) }}
     timeout-minutes: 20
     runs-on: ubuntu-latest
     strategy:
@@ -318,6 +331,8 @@ jobs:
             tests/e2e/test_mcp_full_profile.py
 
   worker-observability:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').observability) }}
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:

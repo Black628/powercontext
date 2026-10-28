@@ -2,12 +2,11 @@ name: SeekDB migration lock diagnostics
 
 on:
   pull_request:
-    paths:
-      - scripts/probe_seekdb_migration_lock.py
-      - .github/workflows/seekdb-lock-probe.yml
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -15,7 +14,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    uses: ./.github/workflows/ci-changes.yml
+    with:
+      baseline-workflow: seekdb-lock-probe.yml
+
   reproduce:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').seekdb_lock) }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

@@ -22,7 +22,9 @@ import sys
 import tomllib
 from pathlib import Path
 
+import ci_changes
 import pytest
+import yaml
 from ci_changes import select_suites
 
 ROOT = Path(__file__).parents[1]
@@ -41,11 +43,29 @@ RULES = tomllib.loads((ROOT / ".github/ci-paths.toml").read_text(encoding="utf-8
         (["evaluation/coding/work_continuity/run.py"], {"evaluation"}),
         (["evaluation/zcode_guidance/pin.py"], {"evaluation", "zcode"}),
         (["tests/e2e/test_kimi_code_host.py"], {"tests", "kimi"}),
-        (["tests/builtin/persistence/test_mysql_schema.py"], {"tests", "database"}),
+        (["tests/builtin/persistence/test_mysql_schema.py"], {"tests", "database", "upgrade", "candidate_replay"}),
         (["tests/native/test_personal_service_lifecycle.py"], {"tests", "native"}),
         (["e2e/bub/compose.yaml"], {"harness"}),
         (["scripts/scan_e2e_evidence.sh"], {"tests", "harness"}),
         (["scripts/sync_dsh_plugin_tree.py"], {"tests", "dsh"}),
+        (["desktop/ui/src/app/App.tsx"], {"desktop"}),
+        (["release/upgrade-support.json"], {"upgrade", "packaging"}),
+        ([".github/workflows/desktop.yml"], {"desktop"}),
+        ([".github/workflows/native-service.yml"], {"native"}),
+        ([".github/workflows/kimi-code-acceptance.yml"], {"kimi"}),
+        ([".github/workflows/zcode-acceptance.yml"], {"zcode"}),
+        ([".github/workflows/upgrade-release.yml"], {"upgrade"}),
+        (
+            [".github/actions/setup-upgrade-oceanbase/action.yml"],
+            {"database", "upgrade", "candidate_replay", "release_schema"},
+        ),
+        (["tests/e2e/test_worker_otlp.py"], {"tests", "observability"}),
+        (["scripts/ci_role_smoke.py"], {"tests", "packaging"}),
+        (["scripts/capture_release_schema.py"], {"upgrade", "release_schema"}),
+        (["scripts/probe_seekdb_migration_lock.py"], {"seekdb_lock"}),
+        (["tests/test_database_migration_cli.py"], {"tests", "database", "upgrade"}),
+        ([".github/workflows/skill-guidance.yml"], {"skill_guidance"}),
+        ([".github/workflows/license-check.yml"], set()),
         (["integrations/bub/src/powercontext_bub/__init__.py"], {"tests", "harness"}),
         (
             ["docs/en/docs/quickstart.md", "integrations/opencode/package.json"],
@@ -65,12 +85,8 @@ def test_pr_selects_affected_suites(paths: list[str], expected: set[str]) -> Non
 @pytest.mark.parametrize(
     "path",
     [
-        "src/powercontext/client.py",
-        "pyproject.toml",
-        "uv.lock",
-        "openapi/powercontext.yaml",
         ".github/actions/setup-python-env/action.yml",
-        ".github/workflows/master.yml",
+        ".github/workflows/ci-changes.yml",
         ".github/ci-paths.toml",
         "tests/e2e/conftest.py",
         "new-component/code.py",
@@ -78,6 +94,16 @@ def test_pr_selects_affected_suites(paths: list[str], expected: set[str]) -> Non
 )
 def test_shared_or_unclassified_changes_run_every_suite(path: str) -> None:
     assert all(select_suites(["docs/en/docs/quickstart.md", path], RULES).values())
+
+
+@pytest.mark.parametrize("path", ["src/powercontext/server/authz/owner_recovery.py", "uv.lock", "pyproject.toml"])
+def test_shared_runtime_inputs_keep_backend_upgrade_and_consumer_coverage(path: str) -> None:
+    selected = select_suites([path], RULES)
+    assert {"tests", "database", "upgrade", "observability", "packaging", "native", "desktop", "pi", "zcode"} <= {
+        suite for suite, enabled in selected.items() if enabled
+    }
+    assert not selected["release_schema"]
+    assert not selected["seekdb_lock"]
 
 
 def git(repository: Path, *arguments: str) -> str:
@@ -195,10 +221,12 @@ def test_moves_and_deletions_keep_the_original_suite(repository: Path) -> None:
 def test_large_diff_includes_code_after_hundreds_of_docs(repository: Path) -> None:
     base = git(repository, "rev-parse", "HEAD")
     head = commit(repository, *(f"docs/page-{index}.md" for index in range(350)), "src/powercontext/client.py")
-    assert all(run_selector(repository, "pull_request", base, head).values())
+    selected = run_selector(repository, "pull_request", base, head)
+    assert selected["tests"] and selected["database"] and selected["upgrade"]
+    assert selected["desktop"] and selected["website"]
 
 
-@pytest.mark.parametrize("event", ["push", "workflow_dispatch", "schedule"])
+@pytest.mark.parametrize("event", ["workflow_dispatch", "schedule", "merge_group"])
 def test_non_pr_events_run_every_suite(repository: Path, event: str) -> None:
     head = commit(repository, "docs/README.md")
     assert all(run_selector(repository, event, head, head).values())
@@ -207,3 +235,121 @@ def test_non_pr_events_run_every_suite(repository: Path, event: str) -> None:
 @pytest.mark.parametrize("base", ["", "not-a-commit", "0" * 40])
 def test_unavailable_diff_runs_every_suite(repository: Path, base: str) -> None:
     assert all(run_selector(repository, "pull_request", base, git(repository, "rev-parse", "HEAD")).values())
+
+
+def test_push_uses_two_dot_range_from_the_verified_baseline(repository: Path) -> None:
+    base = git(repository, "rev-parse", "HEAD")
+    commit(repository, "scripts/upgrade_release_gate.py")
+    head = commit(repository, "docs/zh/说明.md")
+
+    selected = run_selector(repository, "push", base, head)
+
+    assert {suite for suite, enabled in selected.items() if enabled} == {"upgrade", "website", "docs_tests"}
+
+
+def test_rewritten_push_baseline_runs_every_suite(repository: Path) -> None:
+    initial = git(repository, "rev-parse", "HEAD")
+    old_head = commit(repository, "integrations/pi/index.ts")
+    git(repository, "checkout", "-b", "rewritten", initial)
+    head = commit(repository, "docs/new.md")
+
+    assert all(run_selector(repository, "push", old_head, head).values())
+
+
+def test_successful_push_baseline_retains_changes_from_cancelled_runs(repository: Path, monkeypatch) -> None:
+    base = git(repository, "rev-parse", "HEAD")
+    # The migration commit has no successful run; the docs push must still test it.
+    commit(repository, "scripts/upgrade_release_gate.py")
+    head = commit(repository, "docs/new.md")
+    real_run = subprocess.run
+
+    def run(command, **kwargs):
+        if command[0] == "gh":
+            return subprocess.CompletedProcess(command, 0, json.dumps({"workflow_runs": [{"head_sha": base}]}))
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(ci_changes, "ROOT", repository)
+    monkeypatch.setattr(subprocess, "run", run)
+    output = repository / "outputs.txt"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "ci_changes.py",
+            "--event-name",
+            "push",
+            "--base",
+            "",
+            "--head",
+            head,
+            "--baseline-workflow",
+            "master.yml",
+            "--repository",
+            "example/project",
+            "--branch",
+            "master",
+        ],
+    )
+
+    ci_changes.main()
+
+    selected = json.loads(output.read_text().removeprefix("suites="))
+    assert {suite for suite, enabled in selected.items() if enabled} == {"upgrade", "website", "docs_tests"}
+
+
+def test_no_successful_push_baseline_runs_every_suite(repository: Path) -> None:
+    head = commit(repository, "docs/new.md")
+    assert all(run_selector(repository, "push", "", head).values())
+
+
+def test_successful_baseline_ignores_a_newer_success_on_rewritten_history(repository: Path, monkeypatch) -> None:
+    base = git(repository, "rev-parse", "HEAD")
+    unrelated = commit(repository, "integrations/pi/index.ts")
+    git(repository, "checkout", "-b", "rewritten", base)
+    head = commit(repository, "docs/new.md")
+    real_run = subprocess.run
+
+    def run(command, **kwargs):
+        if command[0] == "gh":
+            history = {"workflow_runs": [{"head_sha": unrelated}, {"head_sha": base}]}
+            return subprocess.CompletedProcess(command, 0, json.dumps(history))
+        return real_run(command, **kwargs)
+
+    monkeypatch.setattr(ci_changes, "ROOT", repository)
+    monkeypatch.setattr(subprocess, "run", run)
+
+    assert ci_changes.successful_baseline("master.yml", "example/project", "master", head) == base
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="the Actions gate runs in Bash")
+@pytest.mark.parametrize(
+    ("scope_result", "selected", "upgrade_result", "passes"),
+    [
+        ("success", "false", "skipped", True),
+        ("success", "false", "failure", False),
+        ("success", "true", "success", True),
+        ("success", "true", "skipped", False),
+        ("success", "true", "failure", False),
+        ("success", "true", "cancelled", False),
+        ("failure", "", "skipped", False),
+        ("success", "", "skipped", False),
+    ],
+)
+def test_upgrade_gate_distinguishes_not_required_from_missing_acceptance(
+    scope_result: str, selected: str, upgrade_result: str, passes: bool
+) -> None:
+    workflow = yaml.safe_load((ROOT / ".github/workflows/master.yml").read_text())
+    script = workflow["jobs"]["upgrade-release-gate"]["steps"][0]["run"]
+    result = subprocess.run(
+        ["bash", "-e", "-c", script],  # noqa: S607 -- execute the checked-in Actions gate
+        env={
+            **os.environ,
+            "SCOPE_RESULT": scope_result,
+            "UPGRADE_SELECTED": selected,
+            "UPGRADE_RESULT": upgrade_result,
+        },
+        capture_output=True,
+        check=False,
+    )
+    assert (result.returncode == 0) == passes

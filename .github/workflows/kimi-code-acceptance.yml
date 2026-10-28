@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -22,6 +23,8 @@ env:
 jobs:
   changes:
     uses: ./.github/workflows/ci-changes.yml
+    with:
+      baseline-workflow: kimi-code-acceptance.yml
 
   controlled-cli:
     needs: changes

@@ -17,6 +17,7 @@ on:
           - recall-effort
 
 permissions:
+  actions: read
   contents: read
 
 env:
@@ -24,12 +25,14 @@ env:
   UV_VERSION: "0.10.12"
 
 concurrency:
-  group: e2e-harness-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: e2e-harness-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   changes:
     uses: ./.github/workflows/ci-changes.yml
+    with:
+      baseline-workflow: e2e-harness.yml
 
   validate:
     needs: changes
