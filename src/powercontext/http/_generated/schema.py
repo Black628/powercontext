@@ -6589,7 +6589,7 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                         "type": "number",
                         "maximum": 120.0,
                         "minimum": 0.0,
-                        "exclusiveMinimum": 1.0,
+                        "exclusiveMinimum": True,
                         "default": 120,
                     },
                 },
@@ -8578,11 +8578,11 @@ OPENAPI_SCHEMA: dict[str, JsonValue] = {
                     "model": {"type": "string", "nullable": True},
                     "effective_settings": {
                         "additionalProperties": {
-                            "oneOf": [{"type": "string"}, {"type": "integer"}, {"type": "number"}, {"type": "boolean"}]
+                            "anyOf": [{"type": "string"}, {"type": "integer"}, {"type": "number"}, {"type": "boolean"}]
                         },
                         "type": "object",
                     },
-                    "timeout_seconds": {"type": "number", "exclusiveMinimum": 0.0},
+                    "timeout_seconds": {"type": "number", "minimum": 0.0, "exclusiveMinimum": True},
                     "max_requests": {"type": "integer", "minimum": 1.0},
                     "config_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
                     "prompt": {"$ref": "#/components/schemas/PreparedContextPromptIdentity", "nullable": True},

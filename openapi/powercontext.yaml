@@ -8640,12 +8640,12 @@ components:
         effective_settings:
           type: object
           additionalProperties:
-            oneOf:
+            anyOf:
               - {type: string}
               - {type: integer}
               - {type: number}
               - {type: boolean}
-        timeout_seconds: {type: number, exclusiveMinimum: 0}
+        timeout_seconds: {type: number, minimum: 0, exclusiveMinimum: true}
         max_requests: {type: integer, minimum: 1}
         config_digest: {type: string, pattern: '^sha256:[0-9a-f]{64}$'}
         prompt: {$ref: "#/components/schemas/PreparedContextPromptIdentity", nullable: true}

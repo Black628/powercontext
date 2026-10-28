@@ -60,6 +60,14 @@ HTTP 外层是 `schema`、`status`、`content`、`content_bytes` 四个字段。
 响应仍返回原有内容但省略 `receipt`，并记录不含内容的诊断日志。
 省略 `include_receipt`、传 `false` 或 `null` 均保持 Host 校验的四字段响应；自动召回不请求 Receipt。
 
+## 从 `explain` 和 `reason` 迁移
+
+对于从 PowerContext 1.4.1 升级的调用方，这是一个不兼容变更：prepare 请求不再接受 `explain`，响应也已移除顶层
+`reason`。仍发送 `explain` 的请求会返回 HTTP 422（`invalid_request`）。请将 `"explain": true` 改为
+`"include_receipt": true`，然后从 `receipt.retrieval.searches[]` 读取各次检索的降级信息，并结合其中的
+`family`、`round`、`mode` 和 `fallback_reason` 判断。读取前应先确认响应包含 `receipt`：Receipt 构造失败时会
+保留原准备结果并省略 Receipt，序列化结果超过 8192 字节时也会如此。
+
 Python Client 的等价调用：
 
 ```python

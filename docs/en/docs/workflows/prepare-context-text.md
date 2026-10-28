@@ -64,6 +64,15 @@ response still delivers the original context without `receipt` and records a con
 Omitting `include_receipt`, setting it to `false`, or sending `null` keeps the four-field response
 that official host validators expect; automatic host recall never requests the receipt.
 
+## Migrate from `explain` and `reason`
+
+This is a breaking change for callers upgrading from PowerContext 1.4.1: `explain` is no longer accepted in
+prepare requests, and the top-level `reason` response field has been removed. A request that still sends
+`explain` receives HTTP 422 (`invalid_request`). Replace `"explain": true` with `"include_receipt": true`, then
+read each search's fallback from `receipt.retrieval.searches[]`, together with its `family`, `round`, `mode`,
+and `fallback_reason`. Check that `receipt` is present before reading it: Receipt construction can fail open or
+exceed its 8192-byte limit, in which case the original prepared context is returned without a Receipt.
+
 The equivalent Python request uses the shared Client:
 
 ```python

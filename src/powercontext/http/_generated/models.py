@@ -586,7 +586,7 @@ class DreamBudget(BaseModel):
     max_depth: Annotated[StrictInt, Field(ge=1, le=8)] = 8
     max_output_tokens: Annotated[StrictInt, Field(ge=1, le=4096)] = 4096
     max_model_calls: Annotated[StrictInt, Field(ge=1, le=2)] = 2
-    timeout_seconds: Annotated[StrictFloat, Field(ge=0.0, gt=1.0, le=120.0)] = 120
+    timeout_seconds: Annotated[StrictFloat, Field(gt=0.0, le=120.0)] = 120
 
 
 class Kind(StrEnum):

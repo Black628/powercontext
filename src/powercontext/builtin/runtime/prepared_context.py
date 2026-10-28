@@ -436,9 +436,10 @@ class PreparedContextBuilder:
             seen: set[tuple[str, str, str, int, str | None, str | None]] = set()
             rank = 0
             selected_count = 0
+            omission_reason = "entry_limit" if limit < section.limit else "family_limit"
             for index, entry in enumerate(entries):
                 if selected_count >= limit:
-                    self._record_text_limit(count, entry.kind, len(entries) - index)
+                    self._record_text_limit(count, entry.kind, len(entries) - index, omission_reason)
                     break
                 item = _text_item(entry)
                 artifact = item.artifact
@@ -490,9 +491,10 @@ class PreparedContextBuilder:
         content = render_context_text(included, assembly)
         return content, tuple(origins), omissions, tuple(fragments), _omitted_counts(counts)
 
-    def _record_text_limit(self, omitted: Counter[tuple[str, str]] | None, kind: str, remaining: int) -> None:
+    def _record_text_limit(
+        self, omitted: Counter[tuple[str, str]] | None, kind: str, remaining: int, reason: str
+    ) -> None:
         if omitted is not None:
-            reason = "entry_limit" if self._text_entry_limit is not None else "family_limit"
             omitted[(kind, reason)] += remaining
 
     def _section_entries(

@@ -1036,6 +1036,39 @@ def test_receipt_orders_mixed_history_before_code_evidence() -> None:
     assert all(item.rendered_bytes > 0 for item in receipt.selected)
 
 
+@pytest.mark.parametrize(
+    ("memory_count", "section_limit", "selected_memories", "omission_reason"),
+    [(2, 1, 1, "family_limit"), (8, 8, 7, "entry_limit")],
+)
+def test_receipt_attributes_binding_limit_with_code(
+    memory_count: int, section_limit: int, selected_memories: int, omission_reason: str
+) -> None:
+    request = PrepareContextRequest(
+        query="budget",
+        include_code=True,
+        include_receipt=True,
+        max_bytes=32768,
+        assembly=ContextAssembly.model_validate({"sections": [{"family": "memory", "limit": section_limit}]}),
+    )
+    build = PreparedContextBuilder().build_scopes_result(
+        request=request,
+        current_scope_id="scope",
+        memory_candidates=(
+            PreparedMemoryCandidates(
+                "scope", tuple(_hit(f"memory-{index}", f"Memory {index}") for index in range(memory_count))
+            ),
+        ),
+        code_candidates=_code_candidates(1),
+    )
+
+    receipt = ReceiptEvidence().build(request, build.context, build, "scope")
+
+    assert [(item.family, item.reason, item.count) for item in receipt.omitted] == [
+        ("atomic-memory", omission_reason, 1)
+    ]
+    assert [item.kind for item in receipt.selected] == ["atomic-memory"] * selected_memories + ["code"]
+
+
 @pytest.mark.parametrize("include_profiles,expected", [(False, 18), (True, 26)])
 @pytest.mark.parametrize("include_code", [False, True])
 def test_receipt_retains_large_mixed_scope_selection_within_wire_budget(
