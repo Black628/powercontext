@@ -576,13 +576,14 @@ output_schema:
                       effective_settings:
                         type: object
                         additionalProperties:
-                          oneOf:
+                          anyOf:
                           - type: string
                           - type: integer
                           - type: number
                           - type: boolean
                       timeout_seconds:
                         type: number
+                        minimum: 0
                         exclusiveMinimum: 0
                       max_requests:
                         type: integer

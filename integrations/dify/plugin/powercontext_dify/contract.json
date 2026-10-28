@@ -3628,7 +3628,7 @@
           "effective_settings": {
             "type": "object",
             "additionalProperties": {
-              "oneOf": [
+              "anyOf": [
                 {
                   "type": "string"
                 },
@@ -3646,6 +3646,7 @@
           },
           "timeout_seconds": {
             "type": "number",
+            "minimum": 0,
             "exclusiveMinimum": 0
           },
           "max_requests": {
