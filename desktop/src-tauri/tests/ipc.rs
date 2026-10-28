@@ -226,3 +226,85 @@ fn memory_commands_reject_untrusted_callers_before_accessing_the_connection() {
         }
     }
 }
+
+#[test]
+fn ops_commands_require_the_packaged_main_window_and_reject_arbitrary_input() {
+    use powercontext_desktop::{commands, ops_bridge::OpsHost};
+    use tauri::Manager;
+    let app = mock_builder()
+        .manage(OpsHost::new(None, None, None))
+        .invoke_handler(tauri::generate_handler![
+            commands::ops_inspect,
+            commands::ops_preflight,
+            commands::ops_references
+        ])
+        .build(test_context())
+        .unwrap();
+    for (label, origin, command, body, allowed) in [
+        (
+            "main",
+            LOCAL_ORIGIN,
+            "ops_inspect",
+            serde_json::json!({}),
+            true,
+        ),
+        (
+            "main",
+            LOCAL_ORIGIN,
+            "ops_references",
+            serde_json::json!({}),
+            true,
+        ),
+        (
+            "other",
+            LOCAL_ORIGIN,
+            "ops_inspect",
+            serde_json::json!({}),
+            false,
+        ),
+        (
+            "main",
+            "https://evil.example",
+            "ops_inspect",
+            serde_json::json!({}),
+            false,
+        ),
+        (
+            "main",
+            LOCAL_ORIGIN,
+            "ops_preflight",
+            serde_json::json!({"input":{"operation":"stop","options":{},"executable":"/bin/sh"}}),
+            false,
+        ),
+        (
+            "main",
+            LOCAL_ORIGIN,
+            "ops_preflight",
+            serde_json::json!({"input":{"operation":"shell","options":{}}}),
+            false,
+        ),
+    ] {
+        let window = app.get_webview_window(label).unwrap_or_else(|| {
+            tauri::WebviewWindowBuilder::new(&app, label, Default::default())
+                .build()
+                .unwrap()
+        });
+        let result = get_ipc_response(
+            &window,
+            InvokeRequest {
+                cmd: command.into(),
+                callback: CallbackFn(0),
+                error: CallbackFn(1),
+                url: origin.parse().unwrap(),
+                body: InvokeBody::Json(body),
+                headers: Default::default(),
+                invoke_key: INVOKE_KEY.into(),
+            },
+        );
+        assert_eq!(
+            result.is_ok(),
+            allowed,
+            "{label} {origin} {command}: {result:?}"
+        );
+    }
+}
