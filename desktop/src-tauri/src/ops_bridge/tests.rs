@@ -137,15 +137,22 @@ elif action=='preflight':
  p['target_summary'].update(endpoint=None,data_dir=None,start_on_login=True);p['plan_id']=digest(p);emit(outcome='succeeded',plan=p)
 else:
  op=request['operation_id'];file=root/(op+'.test-result.json');cancel=root/(op+'.test-cancel')
+ def save(value):
+  temporary=file.with_suffix('.tmp');temporary.write_text(json.dumps(value));os.replace(temporary,file)
  def status(result=None,attempt=1):
   return dict(operation_id=op,attempt=attempt,phase='finished' if result else 'executing',executor=dict(pid=os.getpid(),observation='not_confirmed_exited'),execution_state='finished' if result else 'unknown',outcome=result['outcome'] if result else 'pending',cancel_requested=cancel.exists(),result=result,observation=components,history=[dict(attempt=n,outcome=None if n<attempt else (result['outcome'] if result else None)) for n in range(1,attempt+1)],recovery_actions=[] if result else ['inspect','preflight'])
  if action in ('apply','resume'):
-  n=request.get('expected_attempt',0)+1;file.write_text(json.dumps(status(attempt=n)))
+  n=request.get('expected_attempt',0)+1;save(status(attempt=n))
   print(json.dumps(dict(protocol_version=1,request_id=request['request_id'],type='accepted',operation_id=op,attempt=n)),flush=True)
   print(json.dumps(dict(protocol_version=1,request_id=request['request_id'],type='progress',operation_id=op,attempt=n,sequence=1,phase='service')),flush=True)
-  time.sleep(0.4 if behavior!='slow' else 0.9)
+  if behavior in ('await_cancel','await_release'):
+   signal=cancel if behavior=='await_cancel' else root/(op+'.test-release')
+   deadline=time.monotonic()+10
+   while not signal.exists() and time.monotonic()<deadline:time.sleep(0.01)
+   assert signal.exists(), 'test synchronization timed out'
+  else:time.sleep(0.4 if behavior!='slow' else 0.9)
   result=dict(outcome='cancelled' if cancel.exists() else 'succeeded',components=components)
-  final=status(result,n);file.write_text(json.dumps(final));emit(**final)
+  final=status(result,n);save(final);emit(**final)
  elif not file.exists():
   emit(outcome='rejected',error=dict(code='operation_missing'));sys.exit(1)
  else:
@@ -168,6 +175,38 @@ fn independent_missing_target_inspection_and_unhealthy_result_are_preserved() {
     assert_eq!(reply.outcome, OpsOutcome::Rejected);
     assert_eq!(reply.error, Some(OpsErrorCode::ConfigurationInvalid));
     assert_eq!(reply.exit_code, Some(1));
+}
+
+#[test]
+fn absent_target_provisioning_is_unavailable_and_invalid_storage_stays_distinct() {
+    let f = Fixture::new();
+    fs::remove_file(f.support.join("target.json")).unwrap();
+    assert_eq!(
+        f.host().inspect().bridge_error,
+        Some(OpsBridgeError::Unavailable)
+    );
+    fs::remove_dir_all(&f.support).unwrap();
+    assert_eq!(
+        f.host().inspect().bridge_error,
+        Some(OpsBridgeError::Unavailable)
+    );
+    assert!(f.host().references().unwrap().operations.is_empty());
+    fs::write(&f.support, b"not a directory").unwrap();
+    assert_eq!(
+        f.host().inspect().bridge_error,
+        Some(OpsBridgeError::Storage)
+    );
+}
+
+#[test]
+fn non_utf8_native_path_returns_unavailable_without_panicking() {
+    use std::{ffi::OsString, os::unix::ffi::OsStringExt};
+    let mut f = Fixture::new();
+    f.home.push(OsString::from_vec(vec![0xff]));
+    assert_eq!(
+        f.host().inspect().bridge_error,
+        Some(OpsBridgeError::Unavailable)
+    );
 }
 #[test]
 #[cfg(target_os = "macos")]
@@ -216,6 +255,7 @@ fn approvals_are_one_shot_expiring_and_bound_to_exact_plan_and_target() {
 #[cfg(target_os = "macos")]
 fn progress_arrives_during_apply_and_status_cancel_use_independent_children() {
     let f = Fixture::new();
+    f.behavior("await_cancel");
     let host = f.host();
     let approval = f.approve(&host);
     let (send, recv) = mpsc::channel();
@@ -274,14 +314,30 @@ fn lost_response_keeps_reference_and_helper_finishes_without_replay() {
         reopened.references().unwrap().operations[0].operation_id,
         reply.operation_id
     );
-    std::thread::sleep(Duration::from_millis(1000));
-    let status = reopened
-        .operation_status(OpsStatusInput {
-            operation_id: reply.operation_id,
-        })
-        .unwrap();
+    let status = await_terminal_status(&reopened, &reply.operation_id);
     assert_eq!(status.outcome, OpsOutcome::Succeeded);
     assert_eq!(status.attempt, Some(1));
+}
+
+fn await_terminal_status(host: &OpsHost, operation_id: &str) -> OpsOperationReply {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let status = host
+            .operation_status(OpsStatusInput {
+                operation_id: operation_id.into(),
+            })
+            .unwrap();
+        if status.outcome != OpsOutcome::Pending
+            && status.error != Some(OpsErrorCode::OperationMissing)
+        {
+            return status;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "helper did not settle: {status:?}"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
 }
 #[test]
 #[cfg(target_os = "macos")]
@@ -594,6 +650,7 @@ fn real_current_ops_inspect_and_preflight_with_missing_server_runtime() {
 #[test]
 fn fresh_resume_approval_retains_operation_identity_and_advances_attempt() {
     let f = Fixture::new();
+    f.behavior("await_cancel");
     let h = f.host();
     let a = f.approve(&h);
     let (send, recv) = mpsc::channel();
@@ -613,6 +670,7 @@ fn fresh_resume_approval_retains_operation_identity_and_advances_attempt() {
     .unwrap();
     assert_eq!(thread.join().unwrap().outcome, OpsOutcome::Cancelled);
     fs::remove_file(f.support.join(format!("{}.test-cancel", e.operation_id))).unwrap();
+    f.behavior("");
     let approval = h
         .preflight(OpsPreflightInput {
             operation: OpsOperation::RemoveRegistration,
@@ -643,6 +701,7 @@ fn fresh_resume_approval_retains_operation_identity_and_advances_attempt() {
 #[test]
 fn quit_closes_admission_and_preserves_accepted_helper_outcome() {
     let f = Fixture::new();
+    f.behavior("await_release");
     let h = f.host();
     let a = f.approve(&h);
     let (send, recv) = mpsc::channel();
@@ -660,12 +719,13 @@ fn quit_closes_admission_and_preserves_accepted_helper_outcome() {
     assert_eq!(result.outcome, OpsOutcome::Unknown);
     assert_eq!(result.bridge_error, Some(OpsBridgeError::ShuttingDown));
     assert_eq!(h.inspect().bridge_error, Some(OpsBridgeError::ShuttingDown));
-    let status = f
-        .host()
-        .operation_status(OpsStatusInput {
-            operation_id: event.operation_id,
-        })
-        .unwrap();
+    fs::write(
+        f.support
+            .join(format!("{}.test-release", event.operation_id)),
+        b"continue",
+    )
+    .unwrap();
+    let status = await_terminal_status(&f.host(), &event.operation_id);
     assert_eq!(status.outcome, OpsOutcome::Succeeded);
 }
 

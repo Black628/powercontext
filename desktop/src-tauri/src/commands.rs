@@ -208,12 +208,15 @@ pub fn cancel_memory_reads<R: tauri::Runtime>(
 }
 
 #[tauri::command]
-pub fn ops_references<R: tauri::Runtime>(
+pub async fn ops_references<R: tauri::Runtime>(
     window: tauri::WebviewWindow<R>,
     state: tauri::State<'_, crate::ops_bridge::OpsHost>,
 ) -> Result<crate::ops_bridge::OpsReferences, crate::ops_bridge::OpsBridgeError> {
     authorize_window(window.label()).map_err(|_| crate::ops_bridge::OpsBridgeError::Forbidden)?;
-    state.references()
+    let host = state.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || host.references())
+        .await
+        .map_err(|_| crate::ops_bridge::OpsBridgeError::ProcessFailure)?
 }
 #[tauri::command]
 pub async fn ops_inspect<R: tauri::Runtime>(

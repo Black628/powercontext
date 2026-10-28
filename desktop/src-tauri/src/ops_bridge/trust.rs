@@ -146,7 +146,9 @@ impl Trust {
         };
         let fingerprint = sha256(&serde_json::to_vec(&serde_json::json!({
             "bundle":p.bundle_manifest_sha256,"mode":if p.binding_mode == Mode::TargetFile {"target"} else {"catalog"},
-            "binding":digest,"support":support,"home":self.home,"local_data":self.local_data,
+            "binding":digest,"support":path_string(support)?,
+            "home":self.home.as_deref().map(path_string).transpose()?,
+            "local_data":self.local_data.as_deref().map(path_string).transpose()?,
         })).map_err(|_| Error::Storage)?);
         Ok(Binding {
             fingerprint,
@@ -528,12 +530,19 @@ fn read(path: &Path, max: usize) -> Result<Vec<u8>, Error> {
     Ok(bytes)
 }
 fn read_private(path: &Path, max: usize) -> Result<Vec<u8>, Error> {
+    no_links(path)?;
+    if !path.try_exists().map_err(|_| Error::Storage)? {
+        return Err(Error::Unavailable);
+    }
     security::validate(path)?;
     read(path, max)
 }
 fn private_directory(path: &Path, create: bool) -> Result<(), Error> {
     no_links(path)?;
-    if !path.try_exists().map_err(|_| Error::Storage)? && create {
+    if !path.try_exists().map_err(|_| Error::Storage)? {
+        if !create {
+            return Err(Error::Unavailable);
+        }
         if let Some(parent) = path.parent()
             && !parent.exists()
         {

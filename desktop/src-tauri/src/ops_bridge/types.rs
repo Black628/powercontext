@@ -503,7 +503,7 @@ macro_rules! status_enum {
     };
 }
 
-status_enum!(OpsMaintenancePhase { ManualStopped => "manual_stopped", StartFailed => "start_failed", ConfigurationSwitching => "configuration_switching", ManualSwitching => "manual_switching", RuntimeRepair => "runtime_repair" });
+status_enum!(OpsMaintenancePhase { ManualStopped => "manual_stopped", StartFailed => "start_failed", ConfigurationSwitching => "configuration_switching", ManualSwitching => "manual_switching", RuntimeRepair => "runtime_repair", Stopping => "stopping", Stopped => "stopped", Switching => "switching", DatabaseReady => "database_ready" });
 status_enum!(OpsRuntimeResources { Present => "present", MissingExecutable => "missing_executable" });
 status_enum!(OpsConnectionCompatibility { NotChecked => "not_checked" });
 status_enum!(OpsSupportState { Supported => "supported", Unsupported => "unsupported", Unknown => "unknown" });

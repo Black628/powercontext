@@ -535,6 +535,7 @@ pub(super) fn operation(v: &Value, id: &str, code: i32) -> Result<OpsOperationRe
 
 pub(super) struct Stream {
     request: Value,
+    expected_attempt: Option<u32>,
     accepted: Option<u32>,
     sequence: u32,
     result: Option<Value>,
@@ -542,8 +543,21 @@ pub(super) struct Stream {
 }
 impl Stream {
     pub fn new(request: &Value) -> Result<Self> {
+        let expected_attempt = match request["action"].as_str() {
+            // Native apply always allocates a fresh operation ID; it never replays apply.
+            Some("apply") => Some(1),
+            Some("resume") => Some(
+                attempt(&request["expected_attempt"])?
+                    .checked_add(1)
+                    .filter(|n| *n <= 64)
+                    .ok_or(INVALID)?,
+            ),
+            Some("cancel") => Some(attempt(&request["attempt"])?),
+            _ => None,
+        };
         Ok(Self {
             request: request.clone(),
+            expected_attempt,
             accepted: None,
             sequence: 0,
             result: None,
@@ -586,8 +600,7 @@ impl Stream {
                     },
                 )?;
                 let number = attempt(&v["attempt"])?;
-                let expected = self.request["expected_attempt"].as_u64().unwrap_or(0) + 1;
-                if u64::from(number) != expected {
+                if Some(number) != self.expected_attempt {
                     return Err(INVALID);
                 }
                 let (sequence, phase) = if accepted {
@@ -657,8 +670,12 @@ impl Stream {
                             self.request["operation_id"].as_str().ok_or(INVALID)?,
                             0,
                         )?;
-                        if let Some(number) = self.accepted
-                            && result.attempt.is_some_and(|n| n != number)
+                        // Duplicate resume and checkpoint failures can omit accepted.
+                        // Their final result still belongs to the requested attempt.
+                        if result
+                            .attempt
+                            .zip(self.expected_attempt)
+                            .is_some_and(|(number, expected)| number != expected)
                         {
                             return Err(INVALID);
                         }
@@ -749,5 +766,127 @@ impl<'de> Deserialize<'de> for Unique {
             }
         }
         d.deserialize_any(V)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    fn status(number: u32) -> Value {
+        json!({
+            "protocol_version": 1, "request_id": "request", "type": "result",
+            "operation_id": "operation", "attempt": number, "phase": "finished",
+            "executor": {"pid": null, "observation": "exited"},
+            "execution_state": "finished", "outcome": "succeeded",
+            "cancel_requested": false, "result": {"outcome": "succeeded"},
+            "observation": {
+                "support": "supported", "registration": "installed", "definition": "current",
+                "manager_ownership": "owned", "manager": "active", "liveness": "live",
+                "readiness": "not_probed", "endpoint": null, "maintenance": null,
+                "resources": "present", "configuration": "valid"
+            },
+            "history": (1..=number).map(|attempt| json!({
+                "attempt": attempt, "outcome": if attempt == number { "succeeded" } else { "failed" }
+            })).collect::<Vec<_>>(),
+            "recovery_actions": []
+        })
+    }
+
+    fn parsed(request: &Value, response: &Value) -> Result<Value> {
+        let mut stream = Stream::new(request)?;
+        stream.line(&serde_json::to_vec(response).unwrap())?;
+        stream.finish()
+    }
+
+    #[test]
+    fn final_results_bind_attempt_without_accepted_and_status_can_read_latest() {
+        for (action, expected) in [("apply", 1), ("resume", 3), ("cancel", 2)] {
+            let mut request = json!({
+                "protocol_version": 1, "request_id": "request", "action": action,
+                "operation_id": "operation"
+            });
+            if action == "resume" {
+                request["expected_attempt"] = (expected - 1).into();
+            } else if action == "cancel" {
+                request["attempt"] = expected.into();
+            }
+            // A duplicate resume or completed cancel returns status without progress.
+            assert_eq!(
+                parsed(&request, &status(expected)).unwrap(),
+                status(expected)
+            );
+            let wrong = if expected == 1 { 2 } else { 1 };
+            assert_eq!(parsed(&request, &status(wrong)), Err(INVALID));
+
+            let rejected = json!({
+                "protocol_version": 1, "request_id": "request", "type": "result",
+                "outcome": "rejected", "error": {"code": "attempt_conflict"}
+            });
+            assert_eq!(parsed(&request, &rejected).unwrap(), rejected);
+
+            if action != "cancel" {
+                let mut checkpoint = json!({
+                    "protocol_version": 1, "request_id": "request", "type": "result",
+                    "operation_id": "operation", "attempt": expected,
+                    "outcome": "uncertain", "error": {"code": "checkpoint_failed"},
+                    "recovery_actions": ["operation_status"]
+                });
+                assert_eq!(parsed(&request, &checkpoint).unwrap(), checkpoint);
+                checkpoint["attempt"] = wrong.into();
+                assert_eq!(parsed(&request, &checkpoint), Err(INVALID));
+            }
+        }
+        let request = json!({
+            "protocol_version": 1, "request_id": "request", "action": "operation_status",
+            "operation_id": "operation"
+        });
+        assert_eq!(parsed(&request, &status(4)).unwrap(), status(4));
+    }
+
+    #[test]
+    fn inspection_and_operation_status_preserve_controller_maintenance_phases() {
+        for (phase, expected) in [
+            ("stopping", OpsMaintenancePhase::Stopping),
+            ("stopped", OpsMaintenancePhase::Stopped),
+            ("switching", OpsMaintenancePhase::Switching),
+            ("database_ready", OpsMaintenancePhase::DatabaseReady),
+        ] {
+            let mut response = status(1);
+            response["observation"]["maintenance"] = phase.into();
+            let request = json!({
+                "protocol_version": 1, "request_id": "request", "action": "operation_status",
+                "operation_id": "operation"
+            });
+            let value = parsed(&request, &response).unwrap();
+            let reply = operation(&value, "operation", 0).unwrap();
+            assert_eq!(
+                reply
+                    .status
+                    .unwrap()
+                    .observation
+                    .components
+                    .unwrap()
+                    .maintenance,
+                Some(expected)
+            );
+            let inspection_response = json!({
+                "protocol_version": 1, "request_id": "request", "type": "result",
+                "outcome": "succeeded", "components": response["observation"]
+            });
+            let inspection_request = json!({
+                "protocol_version": 1, "request_id": "request", "action": "inspect"
+            });
+            let value = parsed(&inspection_request, &inspection_response).unwrap();
+            assert_eq!(
+                inspection(&value, 0)
+                    .unwrap()
+                    .components
+                    .unwrap()
+                    .maintenance,
+                Some(expected)
+            );
+        }
     }
 }
