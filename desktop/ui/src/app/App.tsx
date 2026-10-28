@@ -310,22 +310,13 @@ export function App() {
             </div>
           )}
           {page === "home" && (
-            <div className="stack">
-              <Overview
-                state={desktop}
-                language={language}
-                onNavigate={navigate}
-                refreshing={refreshing}
-                onRefresh={() => void refresh()}
-              />
-              <Statistics
-                key={`statistics-${desktop?.active?.generation ?? "none"}`}
-                state={desktop}
-                language={language}
-                onState={receiveState}
-                contextPending={contextPending}
-              />
-            </div>
+            <Overview
+              state={desktop}
+              language={language}
+              onNavigate={navigate}
+              refreshing={refreshing}
+              onRefresh={() => void refresh()}
+            />
           )}
           {page === "memories" && (
             <MemoryWorkspace
@@ -358,6 +349,17 @@ export function App() {
               language={language}
               tab={observationTab}
               onTabChange={setObservationTab}
+              panels={{
+                inventory: (
+                  <Statistics
+                    key={`statistics-${desktop?.active?.generation ?? "none"}`}
+                    state={desktop}
+                    language={language}
+                    onState={receiveState}
+                    contextPending={contextPending}
+                  />
+                ),
+              }}
             />
           )}
           {page === "settings" && (

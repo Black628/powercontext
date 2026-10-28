@@ -59,7 +59,7 @@ const state: DesktopState = {
       checkedAt: 1,
       compatibilityVerified: true,
       anonymousAccess: true,
-      supportedOperations: ["get_stats"],
+      supportedOperations: ["get_stats", "remember_memory"],
       liveness: { value: null, error: null },
       readiness: { value: null, error: null },
       identity: { value: null, error: null },

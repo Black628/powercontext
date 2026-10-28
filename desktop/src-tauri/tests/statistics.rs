@@ -155,6 +155,23 @@ async fn setup() -> Fixture {
                         finish.notified().await;
                     }
                     (code.load(Ordering::Relaxed), bodies.lock().unwrap().clone())
+                } else if request.contains("/v1/server-info ") {
+                    (
+                        200,
+                        serde_json::json!({
+                            "schema_version":{"major":1,"minor":0},
+                            "product":"powercontext",
+                            "server_id":"synthetic-statistics-server",
+                            "package_version":"synthetic",
+                            "api_contract_version":{"major":1,"minor":4},
+                            "feature_contracts":{
+                                "scope.selection":{
+                                    "version":{"major":1,"minor":0},
+                                    "operations":["get_scope","list_scopes","get_default_scope"]
+                                }
+                            }
+                        }),
+                    )
                 } else if request.contains("/v1/access/me ") {
                     (
                         503,

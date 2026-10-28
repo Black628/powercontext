@@ -7,13 +7,12 @@ description: "Exact-Scope native statistics, isolation and qualification."
 
 ## Inventory and usage view
 
-Overview contains the self-contained **Current-Scope inventory and usage** view.
-Explicitly select the statistics-qualified `sqlite-stats-bad4c0c2-v1` profile,
+**Observation → Current-Scope inventory & usage** contains the Statistics view.
+Explicitly select the statistics-qualified `sqlite-stats-27404931-v1` profile,
 activate the connection, select an exact Scope, choose a UTC usage period
 and press **Load statistics**. Loading is explicit; opening the view does not
-silently restore a connection or issue a statistics request. The shared shell's
-Observation container can mount the same `Statistics` component with the current
-state, language and state-refresh callback.
+silently restore a connection or issue a statistics request. The shared shell mounts `Statistics` in the Observation inventory panel with the
+current state, language, pending-context guard and state-refresh callback.
 
 The view displays the Server's `as_of`, exact returned Scope coverage and
 inclusive UTC dates. Inventory is a current snapshot. Model request/input/output

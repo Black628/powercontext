@@ -209,10 +209,16 @@ def load_and_compare(
     return expected
 
 
+def open_statistics(page: InstalledPage, language: str = "zh") -> None:
+    page.button("Observation" if language == "en" else "观察")
+    tab = "Current-Scope inventory & usage" if language == "en" else "当前 Scope 库存与用量"
+    page.click(f"//button[@role='tab' and normalize-space(.)='{tab}']")
+
+
 def exercise_statistics(
     page: InstalledPage, server: httpx.Client, scope: str, usage_control: Path
 ) -> dict[str, object]:
-    page.button("总览")
+    open_statistics(page)
     page.wait("return !!document.querySelector('.statistics');")
     if page.observe("return !!document.querySelector('.statistics table');"):
         raise HarnessFailure("installed_statistics_loaded_without_action")
@@ -227,11 +233,11 @@ def exercise_statistics(
         load_and_compare(page, server, scope, period)
     page.button("设置与诊断")
     page.click("//select[@id='language']/option[@value='en']")
-    page.button("Overview")
+    open_statistics(page, "en")
     load_and_compare(page, server, scope, "7d", "en")
     page.button("Settings & diagnostics")
     page.click("//select[@id='language']/option[@value='zh']")
-    page.button("总览")
+    open_statistics(page)
     load_and_compare(page, server, scope, "7d")
     created = server.post(
         "/v1/scopes",
@@ -254,7 +260,7 @@ def exercise_statistics(
         seeded.raise_for_status()
         page.connect("Desktop CI stats B", str(other.base_url).rstrip("/"))
         page.select_scope(other_scope)
-        page.button("总览")
+        open_statistics(page)
         expect_cleared(page, next_scope)
         different = load_and_compare(page, other, other_scope, "7d")
         if different["inventory"]["memory"]["entries"]["total"] != 1:
@@ -263,7 +269,7 @@ def exercise_statistics(
         page.profile("Desktop CI synthetic")
         page.activate("Desktop CI synthetic")
         page.select_scope(scope)
-        page.button("总览")
+        open_statistics(page)
         expect_cleared(page, other_scope)
         load_and_compare(page, server, scope, "7d")
     page.button("记忆")
