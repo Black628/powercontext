@@ -60,10 +60,10 @@ def test_fixed_artifact_storage_resumes_after_registration_columns(backend):  # 
     )
     (journal,) = backend.evidence_directory.rglob("maintenance.json")
     interrupted = json.loads(journal.read_text())
-    assert interrupted["last_revision"] == "s1402"
+    assert interrupted["last_revision"] == "v1_4_1_004"
     assert interrupted["pending_revision"] == "v1_5_0_001"
     recovery = _full_server_runner(backend).plan()
-    assert recovery.state == "recovery_required" and recovery.source_revision == "s1402"
+    assert recovery.state == "recovery_required" and recovery.source_revision == "v1_4_1_004"
     # The DDL returned and its owned connection closed before the injected failure.
     resumed = _full_server_runner(backend, acknowledge_previous_run=(recovery.coordination or {}).get("pending_run_id"))
     result = _apply(resumed)

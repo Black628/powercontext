@@ -20,6 +20,10 @@
       "schemas/mysql-r1400.json",
       "source-provenance.json"
     ],
+    "v1_4_1_004": [
+      "schemas/sqlite-v1_4_1_004.json",
+      "schemas/mysql-v1_4_1_004.json"
+    ],
     "v1_5_0_001": [
       "schemas/sqlite-v1_5_0_001.json",
       "schemas/mysql-v1_5_0_001.json"
@@ -41,13 +45,17 @@
     "r1400": [
       "374ad3217e4dc286c3942708da52cc8262e30581e2b836bedd0c4e693f1b75bc"
     ],
+    "v1_4_1_004": [
+      "84d736b5e722a56ebe8a32318732543d43548a63a43709dbf0c571e7e4af83b5"
+    ],
     "v1_5_0_001": [
-      "966b87e6ed34484a38b20fd770792c9ad5d1bbd87b2252fd86e60bcfee8c81e6"
+      "62ac36b02794855e5bbc426c98d6b6a735a76c0461eb56adeffa7c3e93132296"
     ]
   },
   "affected_objects": [
     "pc_access_audit",
     "pc_access_idempotency",
+    "pc_access_owner_recovery",
     "pc_access_owners",
     "pc_access_relationship_heads",
     "pc_access_relationships",
@@ -233,6 +241,10 @@
       "server_upgrade",
       "portable_storage"
     ],
+    "v1_4_1_004": [
+      "server_upgrade",
+      "portable_storage"
+    ],
     "v1_5_0_001": [
       "artifact_storage",
       "portable_storage"
@@ -251,6 +263,7 @@
     "schemas/mysql-s1400.json",
     "schemas/mysql-s1401.json",
     "schemas/mysql-s1402.json",
+    "schemas/mysql-v1_4_1_004.json",
     "schemas/mysql-v1_5_0_001.json"
   ],
   "mysql_history": "mysql",

@@ -121,6 +121,12 @@
     ],
     [
       "table",
+      "pc_access_owner_recovery",
+      "pc_access_owner_recovery",
+      "CREATE TABLE pc_access_owner_recovery (\n\toperation_id VARCHAR(64) NOT NULL, \n\tdeployment_id VARCHAR(128) NOT NULL, \n\tscope_id VARCHAR(256) NOT NULL, \n\tcompleted BOOLEAN NOT NULL, \n\tpayload TEXT NOT NULL, \n\tPRIMARY KEY (operation_id), \n\tCONSTRAINT uq_pc_access_owner_recovery_pending UNIQUE (deployment_id, completed, operation_id)\n)"
+    ],
+    [
+      "table",
       "pc_access_owners",
       "pc_access_owners",
       "CREATE TABLE pc_access_owners (\n\towner_kind VARCHAR(16) NOT NULL, \n\tobject_key_hash VARCHAR(64) NOT NULL, \n\tscope_id VARCHAR(256) NOT NULL, \n\tfamily VARCHAR(128) NOT NULL, \n\tartifact_id VARCHAR(128), \n\tcandidate_id VARCHAR(128), \n\ttarget_artifact_id VARCHAR(128), \n\tselector_type VARCHAR(32), \n\tselector_entry_id VARCHAR(128), \n\towner_type VARCHAR(16) NOT NULL, \n\towner_id VARCHAR(255) NOT NULL, \n\towner_description TEXT, \n\testablished_at VARCHAR(32), \n\tpolicy_revision VARCHAR(64), \n\tidempotency_key VARCHAR(255) NOT NULL, \n\tPRIMARY KEY (owner_kind, object_key_hash), \n\tCONSTRAINT ck_pc_access_owners_kind CHECK ((owner_kind = 'artifact' AND artifact_id IS NOT NULL AND candidate_id IS NULL AND target_artifact_id IS NULL AND established_at IS NOT NULL AND policy_revision IS NOT NULL) OR (owner_kind = 'candidate' AND candidate_id IS NOT NULL AND artifact_id IS NULL AND selector_type IS NULL AND selector_entry_id IS NULL AND established_at IS NULL AND policy_revision IS NULL))\n)"

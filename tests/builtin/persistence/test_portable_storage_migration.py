@@ -35,7 +35,7 @@ def previous_bundle(directory, embedding):
     shutil.copytree(current.directory, directory, ignore=shutil.ignore_patterns("__pycache__"))
     manifest_path = directory / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
-    removed_revisions = ("s1402", "v1_5_0_001")
+    removed_revisions = ("s1402", "v1_4_1_004", "v1_5_0_001")
     for revision in removed_revisions:
         for resource in manifest["revision_resources"].pop(revision):
             (directory / resource).unlink()
@@ -45,6 +45,7 @@ def previous_bundle(directory, embedding):
         del manifest["sqlite_fingerprints"][revision]
         del manifest["domain_readiness"][revision]
         manifest["mysql_state_layouts"].remove(f"schemas/mysql-{revision}.json")
+    manifest["affected_objects"].remove("pc_access_owner_recovery")
     manifest["domain_steps"] = [step for step in manifest["domain_steps"] if step["revision"] not in removed_revisions]
     for module in ("portable_storage.py", "artifact_storage_readiness.py"):
         (directory / module).unlink()
@@ -92,7 +93,7 @@ def test_registered_s1401_upgrade_preserves_completed_evidence_and_matches_fresh
     upgraded = SQLiteMigrationRunner(database, bundle, configuration=config)
     plan = upgraded.plan()
     assert plan.source_revision == "s1401"
-    assert plan.revisions == ("s1402", "v1_5_0_001")
+    assert plan.revisions == ("s1402", "v1_4_1_004", "v1_5_0_001")
     assert apply(upgraded).revision == "v1_5_0_001"
     assert upgraded.verify().state == "ready"
     assert not apply(upgraded).changed
