@@ -24,13 +24,13 @@ from typing import Any
 
 import httpx
 import pytest
-from openai import AsyncOpenAI
+from openai import APIConnectionError, AsyncOpenAI
 from pydantic import BaseModel, SecretStr
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from powercontext.builtin.inference.carrier_checks import inspect_sse
-from powercontext.builtin.inference.errors import InferencePrivacyError
+from powercontext.builtin.inference.errors import InferencePrivacyError, find_privacy_error
 from powercontext.builtin.inference.models import InferenceUsage
 from powercontext.builtin.inference.privacy import InferenceProtectionConfig, PrivacyPolicy, UpstreamProfile
 from powercontext.builtin.inference.protected_transport import ProtectedAsyncTransport
@@ -167,7 +167,7 @@ def test_text_schemas_can_define_opaque_carrier_property_names(protocol, schema_
             else {"response_format": {"type": "json_schema", "json_schema": {"name": "file", "schema": schema}}}
         )
     elif protocol == "openai-responses":
-        request = {"model": "test-model", "max_output_tokens": 10, "input": "clean"}
+        request = {"model": "test-model", "max_output_tokens": 10, "input": "clean", "store": False}
         request.update(
             {"tools": [{"type": "function", "name": "describe_file", "parameters": schema}]}
             if schema_location == "tool"
@@ -323,6 +323,42 @@ def response(content: str = '{"value":"ok"}') -> bytes:
             "prompt_tokens_details": {"cached_tokens": 8},
         },
     }).encode()
+
+
+def test_native_responses_sdk_requires_non_storing_expanded_input_before_real_send() -> None:
+    async def run(endpoint: str) -> None:
+        endpoint = endpoint.replace("/chat/completions", "/responses")
+        protection = config(endpoint)
+        protection = protection.model_copy(
+            update={"targets": {"test": protection.targets["test"].model_copy(update={"protocol": "openai-responses"})}}
+        )
+        async with (
+            httpx.AsyncClient(transport=ProtectedAsyncTransport(protection)) as http,
+            AsyncOpenAI(
+                base_url=endpoint.removesuffix("/responses"), api_key="test", max_retries=0, http_client=http
+            ) as sdk,
+        ):
+            cases: tuple[tuple[dict[str, Any], str], ...] = (
+                ({"input": "clean"}, "provider_state_unsupported"),
+                (
+                    {"input": [{"type": "item_reference", "id": "msg_prior_private"}], "store": False},
+                    "content_unsupported",
+                ),
+            )
+            for extra, reason in cases:
+                with pytest.raises(APIConnectionError) as caught:
+                    await sdk.responses.create(model="test-model", max_output_tokens=10, **extra)
+                refusal = find_privacy_error(caught.value)
+                assert refusal is not None and refusal.phase == "before_send"
+                assert refusal.reason_codes == (reason,)
+            result = await sdk.responses.create(model="test-model", input="clean", store=False, max_output_tokens=10)
+            assert result.status == "completed"
+
+    payload = json.dumps({"id": "resp_test", "model": "test-model", "status": "completed", "output": []}).encode()
+    with server([(200, "application/json", payload)]) as (upstream, endpoint):
+        asyncio.run(run(endpoint))
+        assert len(upstream.requests) == 1
+        assert json.loads(upstream.requests[0])["store"] is False
 
 
 class Value(BaseModel):

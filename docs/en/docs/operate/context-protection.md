@@ -66,10 +66,19 @@ The supported rules match configured exact values and optional bounded formats: 
 keys, opaque image/audio/file carriers, unknown request fields, incomplete output, and unsupported targets cannot
 receive complete coverage. These rules are not a general PII classifier, semantic DLP system, or tool authorization.
 
+The bounded `openai-responses` profile requires an explicit boolean `store: false`; omitted, null, or enabled
+storage is withheld. Responses otherwise stores responses by default; see the provider's
+[data-retention contract](https://developers.openai.com/api/docs/guides/conversation-state#data-retention-for-model-responses).
+For built-in Pydantic AI Responses models, set `openai_store: false` in the relevant model settings.
+Unexpanded `item_reference` inputs are withheld because their historical content is unavailable for inspection
+and window accounting. Pass the complete supported text/tool input instead of a provider-side item reference.
+
 Built-in OpenAI/Anthropic clients and configured embedding/rerank paths install the checks at the final HTTP
 transport. Native SDK formatting happens first. Enforcing disables SDK transport retries; output-schema retries
 remain bounded by the existing stage and every actual attempt is checked. A mandatory privacy failure propagates
 through advisory decision fallbacks and cannot become an empty extraction or a consumed Memory HOLD.
+If a Memory write gate encounters that refusal, flush fails before publication and keeps its Source window
+pending across restart so it can be retried after the policy or model output is corrected.
 Custom injected inference objects without a controlled final transport are rejected in enforcing mode.
 
 ## Prepare once, validate each use

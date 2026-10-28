@@ -118,7 +118,7 @@ async def test_null_error_does_not_authorize_incomplete_output(protocol):
     request = _send()
     if protocol == "openai-responses":
         request = request.model_copy(
-            update={"payload": _payload({"model": "test", "max_output_tokens": 64, "input": "safe"})}
+            update={"payload": _payload({"model": "test", "max_output_tokens": 64, "input": "safe", "store": False})}
         )
     send = await _check(request, codec, config=config)
     assert send.decision == "allow" and send.binding

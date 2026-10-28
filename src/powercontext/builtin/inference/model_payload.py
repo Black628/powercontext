@@ -52,6 +52,7 @@ _OPAQUE_TYPES = frozenset({
     "file",
     "video",
     "redacted_thinking",
+    "item_reference",
 })
 _CONTENT_FIELDS = frozenset({
     "messages",

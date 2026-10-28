@@ -391,7 +391,12 @@ class PrivacyPolicy:
                 return self.decision(phase, "withhold", "content_field_unsupported")
             if value.get("stream") is True and (not profile.allow_streaming or profile.protocol != "openai-chat"):
                 return self.decision(phase, "withhold", "streaming_unsupported")
-            if "extra_body" in value or value.get("store") is True or value.get("truncation") == "auto":
+            if (
+                "extra_body" in value
+                or value.get("store") is True
+                or (profile.protocol == "openai-responses" and value.get("store") is not False)
+                or value.get("truncation") == "auto"
+            ):
                 return self.decision(phase, "withhold", "provider_state_unsupported")
             if "n" in value and json_unsigned_integer(value["n"]) != 1:
                 return self.decision(phase, "withhold", "multiple_choices_unsupported")

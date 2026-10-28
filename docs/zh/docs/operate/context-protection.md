@@ -60,9 +60,17 @@ Server 可通过 `POWERCONTEXT_SERVER_INFERENCE_PROTECTION` 设置相同对象�
 未知请求字段、不完整输出和不支持的目标无法取得完整覆盖。
 这不是通用 PII 分类器、语义 DLP 或工具执行授权。
 
+有界的 `openai-responses` profile 要求显式提供布尔值 `store: false`；省略、null 或启用存储都会暂缓。
+Responses 默认会存储响应，参见提供方的[数据保留约定](https://developers.openai.com/api/docs/guides/conversation-state#data-retention-for-model-responses)。
+内置 Pydantic AI Responses 模型可在对应的 model settings 中设置 `openai_store: false`。
+未展开的 `item_reference` 输入也会暂缓，因为无法检查其历史内容或把它计入窗口预算。
+请提供受支持的完整文本和工具输入，而不是提供方的历史条目引用。
+
 内置 OpenAI/Anthropic、Embedding、Rerank 路径把检查接在最终 HTTP transport，
 原生 SDK 的格式转换先完成。Enforcing 关闭 SDK 传输层自动重试；原有阶段的输出 schema 重试仍有界，
 每次实际发送都要检查。必需隐私错误会穿透 advisory 决策降级，不会变成空提取结果或已消费的 Memory HOLD。
+Memory 写入 gate 遇到这类拒绝时，flush 会在发布前失败，Source 窗口在重启后仍待处理；
+修正策略或模型输出后可重试。
 无法控制最终传输边界的自定义推理对象，在 enforcing 模式下明确拒绝注入。
 
 ## 准备一次，每次复用都验证

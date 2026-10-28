@@ -70,6 +70,55 @@ def _send(scope_id, content, binding=None):
     }
 
 
+def test_public_responses_check_requires_explicit_non_storing_input(tmp_path):
+    async def scenario():
+        inference = _inference()
+        target = inference.protection.targets["model"].model_copy(update={"protocol": "openai-responses"})
+        inference = inference.model_copy(
+            update={"protection": inference.protection.model_copy(update={"targets": {"model": target}})}
+        )
+        async with _server(tmp_path, inference=inference) as (_, client, _):
+            scope_id = await _scope(client)
+            request = _send(scope_id, "safe")
+            body = {"model": "test", "max_output_tokens": 64, "input": "safe"}
+            for storage in ({}, {"store": True}, {"store": None}, {"store": 0}, {"store": "false"}, {"store": False}):
+                request["payload"]["body"] = json.dumps(body | storage)
+                response = await client.post("/v1/context/check", json=request)
+                assert response.status_code == 200, response.text
+                result = response.json()
+                if storage.get("store") is False:
+                    assert result["decision"] == "allow" and result["coverage"]["complete"]
+                    assert result["binding"]
+                else:
+                    assert result["decision"] == "withhold" and not result["coverage"]["complete"]
+                    assert result["reason_codes"] == ["provider_state_unsupported"]
+                    assert "binding" not in result
+
+            request["payload"]["body"] = json.dumps(
+                body | {"store": False, "input": [{"type": "item_reference", "id": "msg_prior_private"}]}
+            )
+            response = await client.post("/v1/context/check", json=request)
+            assert response.status_code == 200, response.text
+            result = response.json()
+            assert result["decision"] == "withhold" and not result["coverage"]["complete"]
+            assert result["reason_codes"] == ["content_unsupported"]
+            assert "binding" not in result
+
+            request["payload"]["body"] = json.dumps(
+                body
+                | {
+                    "store": False,
+                    "input": [{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "safe"}]}],
+                }
+            )
+            response = await client.post("/v1/context/check", json=request)
+            assert response.status_code == 200, response.text
+            result = response.json()
+            assert result["decision"] == "allow" and result["coverage"]["complete"] and result["binding"]
+
+    asyncio.run(scenario())
+
+
 async def _prepare(client, scope_id, *, headers=None, reuse=True):
     return await client.post(
         "/v1/context/prepare",
