@@ -40,7 +40,10 @@ from powercontext.builtin.runtime import (
     open_builtin_contexts,
     open_builtin_runtime,
 )
-from powercontext.builtin.runtime.atomic_memory_rebuild import rebuild_atomic_memory_projection
+from powercontext.builtin.runtime.atomic_memory_rebuild import (
+    rebuild_atomic_memory_projection,
+    verify_atomic_memory_current,
+)
 from powercontext.builtin.runtime.relational import RelationalContexts
 from powercontext.builtin.scope import ScopeDraft
 from powercontext.builtin.sources import CONTENT_SOURCE_DEFINITION
@@ -254,6 +257,11 @@ def test_mixed_evidence_survives_failed_revision_restart_and_rebuild(migration_b
                 (refs[1], asserted),
                 (refs[2], remote),
             )
+            async with contexts.database.transaction() as connection:
+                assert (
+                    await contexts.atomic_memory.index.read_evidence_projection(connection, "scope", original.ref)
+                    == annotation
+                )
 
             def reject_snapshot(connection, cursor, statement, *args):
                 if statement.lstrip().upper().startswith("INSERT INTO PC_ATOMIC_MEMORY_EVIDENCE_HISTORY"):
@@ -299,11 +307,27 @@ def test_mixed_evidence_survives_failed_revision_restart_and_rebuild(migration_b
             await assert_retained(contexts, annotation)
             async with contexts.database.transaction() as connection:
                 await connection.execute(text("DELETE FROM pc_atomic_memory_current"))
+                await connection.execute(text("DELETE FROM pc_atomic_memory_evidence"))
+                damaged = await verify_atomic_memory_current(
+                    connection, contexts.atomic_memory.index, require_evidence_projection=True
+                )
+                assert not damaged.ready
+                assert damaged.counts["evidence_projection_differences"] == 3
             report = await rebuild_atomic_memory_projection(
                 contexts.database, contexts.atomic_memory.index, maintenance_confirmed=True, batch_size=1
             )
             assert report.ready, report.errors
             await assert_retained(contexts, annotation)
+            async with contexts.database.transaction() as connection:
+                for scope_id, reference, expected in (
+                    ("scope", original.ref, annotation),
+                    ("scope", revised.ref, current),
+                    ("other", other.ref, other_annotation),
+                ):
+                    assert (
+                        await contexts.atomic_memory.index.read_evidence_projection(connection, scope_id, reference)
+                        == expected
+                    )
             async with contexts.database.transaction() as connection:
                 await connection.execute(
                     text(
@@ -330,6 +354,11 @@ def test_mixed_evidence_survives_failed_revision_restart_and_rebuild(migration_b
             )
             assert report.ready, report.errors
             await assert_retained(contexts, neutral)
+            async with contexts.database.transaction() as connection:
+                assert (
+                    await contexts.atomic_memory.index.read_evidence_projection(connection, "scope", original.ref)
+                    == neutral
+                )
 
     asyncio.run(scenario())
 

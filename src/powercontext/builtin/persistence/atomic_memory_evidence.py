@@ -24,11 +24,14 @@ import rfc8785
 from aiosqlite import Connection as SQLiteConnection
 from pydantic import BaseModel, ConfigDict, ValidationError
 from sqlalchemy import insert, select
+from sqlalchemy.dialects.mysql import insert as mysql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection
 
 from powercontext.artifacts import ArtifactRef
 from powercontext.builtin.persistence.atomic_memory_evidence_schema import ATOMIC_MEMORY_EVIDENCE_HISTORY_TABLE
+from powercontext.builtin.persistence.atomic_memory_index_schema import ATOMIC_MEMORY_EVIDENCE_PROJECTION_TABLE
 from powercontext.builtin.persistence.sources import SourceRepository, _require_identity
 from powercontext.limits import MAX_SCOPE_ID_LENGTH
 from powercontext.sources import SourceRef
@@ -49,8 +52,8 @@ class AtomicMemoryEvidenceAnnotation(BaseModel):
 class AtomicMemoryEvidenceRepository:
     """Join caller transactions; retained inputs are never deleted with the index.
 
-    The annotation is derived from retained inputs at read time. There is no
-    separate cache to confuse with accepted history or join into search.
+    Accepted history is immutable. The index-owned projection can be discarded
+    and replaced from verified history without joining it into search.
     """
 
     async def save(
@@ -104,6 +107,42 @@ class AtomicMemoryEvidenceRepository:
         artifact_ref = self._reference(scope_id, artifact_ref)
         payload = await self._payload(connection, scope_id, artifact_ref)
         return None if payload is None else self._decode(scope_id, artifact_ref, payload)
+
+    async def read_projection(
+        self, connection: AsyncConnection, scope_id: str, artifact_ref: ArtifactRef
+    ) -> AtomicMemoryEvidenceAnnotation | None:
+        artifact_ref = self._reference(scope_id, artifact_ref)
+        table = ATOMIC_MEMORY_EVIDENCE_PROJECTION_TABLE
+        payload = await connection.scalar(
+            select(table.c.sources).where(
+                table.c.scope_id == scope_id,
+                table.c.artifact_id == artifact_ref.artifact_id,
+                table.c.revision == artifact_ref.revision,
+            )
+        )
+        return None if payload is None else self._decode(scope_id, artifact_ref, payload)
+
+    async def replace_projection(self, connection: AsyncConnection, annotation: AtomicMemoryEvidenceAnnotation) -> None:
+        reference = self._reference(annotation.scope_id, annotation.artifact_ref)
+        table = ATOMIC_MEMORY_EVIDENCE_PROJECTION_TABLE
+        payload = rfc8785.dumps([source.model_dump(mode="json") for source in annotation.sources])
+        if connection.dialect.name == "sqlite":
+            statement = sqlite_insert(table)
+            statement = statement.on_conflict_do_update(
+                index_elements=("scope_id", "artifact_id", "revision"), set_={"sources": statement.excluded.sources}
+            )
+        else:
+            statement = mysql_insert(table)
+            statement = statement.on_duplicate_key_update(sources=statement.inserted.sources)
+        await connection.execute(
+            statement,
+            {
+                "scope_id": annotation.scope_id,
+                "artifact_id": reference.artifact_id,
+                "revision": reference.revision,
+                "sources": payload,
+            },
+        )
 
     async def verify(
         self,

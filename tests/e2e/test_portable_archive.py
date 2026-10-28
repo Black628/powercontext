@@ -138,6 +138,13 @@ def test_archive_preserves_accepted_native_evidence(tmp_path: Path) -> None:
         async with open_builtin_contexts(target_config, source_registry=registry) as target:
             actual = await target.atomic_memory.for_scope(scope.scope_id).evidence("rule", revision=1)
             assert actual == expected
+            async with target.database.transaction() as connection:
+                assert (
+                    await target.atomic_memory_index.read_evidence_projection(
+                        connection, scope.scope_id, expected.artifact_ref
+                    )
+                    == expected
+                )
 
     asyncio.run(scenario())
 

@@ -90,6 +90,11 @@ class ServerVectorProfile:
             layouts["v1_5_0_001"] = layouts["v1_4_1_004"] + [
                 ["table", name, name, statement] for statement in evidence if (name := _created_table(statement))
             ]
+        if "v1_5_0_002" in manifest["revision_resources"]:
+            evidence = json.loads((directory / "schemas/sqlite-v1_5_0_002.json").read_text(encoding="utf-8"))["create"]
+            layouts["v1_5_0_002"] = layouts["v1_5_0_001"] + [
+                ["table", name, name, statement] for statement in evidence if (name := _created_table(statement))
+            ]
         for entries in layouts.values():
             entries.sort(key=lambda row: (row[0], row[1]))
         return layouts
