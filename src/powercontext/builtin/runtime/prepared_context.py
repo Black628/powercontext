@@ -826,7 +826,7 @@ def _rank_spans(candidates: Sequence[tuple[MemoryEntryAddress, str]], query: str
         if len(matched) == len(wanted):
             score += 0.5
         ranked.append((score, -start, address, start, end, chunk))
-    ranked.sort(reverse=True)
+    ranked.sort(key=lambda item: (item[0], item[1]), reverse=True)
 
     ordered: list[tuple[MemoryEntryAddress, int, int, str]] = []
     seen: set[tuple[str, str, int, int]] = set()
