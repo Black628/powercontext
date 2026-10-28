@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -18,6 +19,8 @@ concurrency:
 jobs:
   changes:
     uses: ./.github/workflows/ci-changes.yml
+    with:
+      baseline-workflow: native-service.yml
 
   linux-systemd-user:
     needs: changes

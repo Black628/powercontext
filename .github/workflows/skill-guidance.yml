@@ -2,25 +2,28 @@ name: Skill guidance validation
 
 on:
   pull_request:
-    paths:
-      - evaluation/skills/skill-up/**
-      - openapi/powercontext.yaml
-      - integrations/claude-code/plugins/powercontext/skills/powercontext-project-context/**
-      - .github/workflows/skill-guidance.yml
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [master]
-    paths:
-      - evaluation/skills/skill-up/**
-      - openapi/powercontext.yaml
-      - integrations/claude-code/plugins/powercontext/skills/powercontext-project-context/**
-      - .github/workflows/skill-guidance.yml
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
+concurrency:
+  group: skill-guidance-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  changes:
+    uses: ./.github/workflows/ci-changes.yml
+    with:
+      baseline-workflow: skill-guidance.yml
+
   validate:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').skill_guidance) }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

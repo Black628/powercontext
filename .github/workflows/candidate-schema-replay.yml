@@ -2,20 +2,13 @@ name: Candidate schema replay
 
 on:
   pull_request:
-    paths:
-      - src/powercontext/builtin/persistence/**
-      - src/powercontext/builtin/artifacts/**
-      - tests/builtin/persistence/**
-      - scripts/replay_candidate_migration.py
-      - .github/workflows/candidate-schema-replay.yml
-      - .github/actions/setup-upgrade-oceanbase/**
-      - pyproject.toml
-      - uv.lock
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [master]
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -23,7 +16,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    uses: ./.github/workflows/ci-changes.yml
+    with:
+      baseline-workflow: candidate-schema-replay.yml
+
   replay:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').candidate_replay) }}
     name: Candidate replay (${{ matrix.backend }})
     runs-on: ubuntu-24.04
     timeout-minutes: 30

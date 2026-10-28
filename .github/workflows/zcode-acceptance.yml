@@ -10,6 +10,7 @@ on:
     - cron: '23 3 * * 0'
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -26,6 +27,8 @@ env:
 jobs:
   changes:
     uses: ./.github/workflows/ci-changes.yml
+    with:
+      baseline-workflow: zcode-acceptance.yml
 
   controlled-cli:
     needs: changes

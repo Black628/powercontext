@@ -2,16 +2,11 @@ name: Capture released Server schema
 
 on:
   pull_request:
-    paths:
-      - scripts/capture_release_schema.py
-      - scripts/upgrade_database_probe.py
-      - scripts/upgrade_process.py
-      - tests/release_upgrades/test_full_server.py
-      - .github/workflows/capture-release-schema.yml
-      - .github/actions/setup-upgrade-oceanbase/**
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -19,7 +14,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  changes:
+    uses: ./.github/workflows/ci-changes.yml
+    with:
+      baseline-workflow: capture-release-schema.yml
+
   capture:
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || fromJSON(needs.changes.outputs.suites || '{}').release_schema) }}
     name: Capture 1.4.0 (${{ matrix.backend }}, ${{ matrix.configuration }})
     runs-on: ubuntu-24.04
     timeout-minutes: 45
