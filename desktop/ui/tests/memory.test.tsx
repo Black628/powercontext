@@ -346,6 +346,7 @@ function outcome(status: "succeeded" | "unknown" | "failed"): WriteOutcome {
       context: {
         connectionId: "connection-a",
         endpoint: "http://127.0.0.1:8000",
+        serverId: "server-a",
         principal: null,
         generation: 1,
         scopeId: "scope-a",
@@ -357,12 +358,12 @@ function outcome(status: "succeeded" | "unknown" | "failed"): WriteOutcome {
     result: status === "succeeded" ? { changed: false, records: [] } : null,
   };
 }
-function form() {
+function form(language: "en" | "zh" = "en") {
   vi.mocked(desktopApi.state).mockResolvedValue(state);
   render(
     <NoteForm
       state={state}
-      language="en"
+      language={language}
       onState={vi.fn()}
       onDirty={vi.fn()}
       onReadSaved={vi.fn()}
@@ -752,31 +753,38 @@ test.each(["en", "zh"] as const)(
   },
 );
 
-test("unknown save retains the draft, names its original target, and does not replay automatically", async () => {
-  const user = userEvent.setup();
-  form();
-  vi.mocked(desktopApi.remember).mockResolvedValue(outcome("unknown"));
-  await user.type(screen.getByLabelText("Memory text"), "preserve me");
-  await user.click(screen.getByRole("button", { name: "Save" }));
-  expect(screen.getByRole("alert").textContent).toContain("outcome is unknown");
-  expect(screen.getByRole("alert").textContent).toContain(
-    "http://127.0.0.1:8000 · scope-a",
-  );
-  expect(
-    (screen.getByLabelText("Memory text") as HTMLTextAreaElement).value,
-  ).toBe("preserve me");
-  expect(desktopApi.remember).toHaveBeenCalledTimes(1);
+test.each(["en", "zh"] as const)(
+  "%s unknown save retains its draft and original deployment without replay",
+  async (language) => {
+    const user = userEvent.setup();
+    form(language);
+    const label = language === "en" ? "Memory text" : "记忆内容";
+    const save = language === "en" ? "Save" : "保存";
+    vi.mocked(desktopApi.remember).mockResolvedValue(outcome("unknown"));
+    await user.type(screen.getByLabelText(label), "preserve me");
+    await user.click(screen.getByRole("button", { name: save }));
+    expect(screen.getByRole("alert").textContent).toContain(
+      language === "en" ? "outcome is unknown" : "未知",
+    );
+    expect(screen.getByRole("alert").textContent).toContain(
+      "http://127.0.0.1:8000 · server-a · scope-a",
+    );
+    expect((screen.getByLabelText(label) as HTMLTextAreaElement).value).toBe(
+      "preserve me",
+    );
+    expect(desktopApi.remember).toHaveBeenCalledTimes(1);
 
-  await user.click(screen.getByRole("button", { name: "Save" }));
-  await answerConfirmation(user, false);
-  expect(desktopApi.remember).toHaveBeenCalledTimes(1);
-  expect(
-    (screen.getByLabelText("Memory text") as HTMLTextAreaElement).value,
-  ).toBe("preserve me");
-  await user.click(screen.getByRole("button", { name: "Save" }));
-  await answerConfirmation(user, true);
-  expect(desktopApi.remember).toHaveBeenCalledTimes(2);
-});
+    await user.click(screen.getByRole("button", { name: save }));
+    await answerConfirmation(user, false);
+    expect(desktopApi.remember).toHaveBeenCalledTimes(1);
+    expect((screen.getByLabelText(label) as HTMLTextAreaElement).value).toBe(
+      "preserve me",
+    );
+    await user.click(screen.getByRole("button", { name: save }));
+    await answerConfirmation(user, true);
+    expect(desktopApi.remember).toHaveBeenCalledTimes(2);
+  },
+);
 test.each(["forbidden", "network"])(
   "a save completing after a %s search failure keeps its receipt without restoring private bodies",
   async (code) => {
