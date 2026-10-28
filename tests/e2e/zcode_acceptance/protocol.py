@@ -50,7 +50,7 @@ def decode_response(raw: bytes) -> dict[str, Any]:
                     value = json.loads(line[6:])
                 except ValueError:
                     continue
-                if isinstance(value, dict) and "result" in value:
+                if isinstance(value, dict) and ("result" in value or "error" in value):
                     return value
     return {}
 
@@ -64,10 +64,16 @@ class WireEvidence:
         self.arrivals: list[dict[str, Any]] = []
 
     def calls(self, name: str, start: int = 0) -> list[dict[str, Any]]:
+        # Body-reading middleware exposes tools/call payloads on redirects too.
+        # Count only correlated JSON-RPC responses, including failures.
         return [
             item
             for item in self.records[start:]
-            if item["request"].get("method") == "tools/call" and item["request"].get("params", {}).get("name") == name
+            if item["request"].get("method") == "tools/call"
+            and item["request"].get("params", {}).get("name") == name
+            and "id" in item["request"]
+            and item["response"].get("id") == item["request"]["id"]
+            and ("result" in item["response"] or "error" in item["response"])
         ]
 
     def result(self, name: str, start: int = 0) -> dict[str, Any]:
@@ -136,9 +142,11 @@ class ObserveServer:
     def __init__(self, app: ASGIApp, evidence: WireEvidence) -> None:
         self.app = app
         self.evidence = evidence
+        self.event_loop: asyncio.AbstractEventLoop | None = None
         self.capture_response_gate: CaptureResponseGate | None = None
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:  # noqa: C901
+        self.event_loop = asyncio.get_running_loop()
         if scope["type"] != "http":
             await self.app(scope, receive, send)
             return
@@ -220,7 +228,7 @@ class HostModelFixture:
                 (
                     item["function"]["name"]
                     for item in body.get("tools", [])
-                    if item["function"]["name"].endswith("__" + operation)
+                    if item["function"]["name"] == operation or item["function"]["name"].endswith("__" + operation)
                 ),
                 None,
             )

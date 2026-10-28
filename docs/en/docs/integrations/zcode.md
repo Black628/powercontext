@@ -356,7 +356,7 @@ after Server restart failed with `Session not found`. Creating a new task restor
 the app; recovery of the original task and automatic reconnection are not established. Handoff completed
 `handoff_current_work` → `continue_handoff` (prepared) → `commit_handoff` → fresh-session
 `continue_handoff` (latest), and revision 1 was read back from the Server. Other exercised tools include `get_scope`,
-`list_memory_entries`, `capture_content_source`, `list_artifact_candidates`, and `list_dream_runs`; the last two
+`list_memory_entries`, `capture_content_source`, `list_candidates`, and `list_dream_runs`; the last two
 returned valid empty lists. A plugin installed in a fresh directory created by the Windows login user also passed
 official desktop MCP `list_scopes` and Hook Source capture against the isolated Server. Other official releases remain
 unverified. Open-source ZCode CLI 0.16.9 also completed a real-model, local-Server capture →
@@ -463,3 +463,7 @@ Server URL was saved; it cannot change the MCP endpoint in a normal installation
 Remove only the PowerContext path from `plugins.dirs` in `~/.zcode/cli/config.json`. Delete
 `~/.zcode/cli/plugins/powercontext` only after confirming it contains `.powercontext-owned`. Fully quit and reopen
 ZCode. Uninstalling the plugin does not remove Server data or ZCode model configuration.
+
+## Automatic input privacy
+
+See [Automatic prompt privacy](index.md#automatic-prompt-privacy) for this host's capture default, disable control, credential recognition limits and independent read-only query handling. Recognized inputs are skipped for capture; accepted Source content and event identity are not rewritten.

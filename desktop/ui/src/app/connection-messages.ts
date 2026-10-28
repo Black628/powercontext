@@ -28,7 +28,7 @@ export const connectionMessages = {
     bearer: "Bearer 凭据",
     secret: "新的 Bearer 凭据",
     storage: "凭据保存方式",
-    persistent: "Windows 凭据管理器",
+    persistent: "系统凭据存储",
     session: "仅本次会话",
     keep: "保留现有凭据",
     credentialBlock: "访问凭据",
@@ -47,6 +47,13 @@ export const connectionMessages = {
     systemTrust: "留空使用系统证书信任；不支持跳过证书校验。",
     compatibility: "已验证兼容配置",
     unselected: "未选择：仅检查连接",
+    availableProfiles: "此 Desktop 构建可用",
+    historicalProfiles: "历史验证记录：此构建不可用",
+    unavailableProfile: "此构建不可用",
+    profileContractMismatch:
+      "该配置的 API 契约与此 Desktop 构建不同。请选择可用配置，保存后重新检查连接。",
+    profileMissing:
+      "此 Desktop 未包含该兼容配置的验证记录。请选择可用配置，保存后重新检查连接。",
     compatibilityHint:
       "配置表示已测试的 Server 构建，不证明远端二进制身份。请先核对部署版本。",
     save: "保存配置",
@@ -134,7 +141,7 @@ export const connectionMessages = {
     bearer: "Bearer credential",
     secret: "New Bearer credential",
     storage: "Credential storage",
-    persistent: "Windows Credential Manager",
+    persistent: "System credential storage",
     session: "This session only",
     keep: "Keep existing credential",
     credentialBlock: "Access credential",
@@ -156,6 +163,13 @@ export const connectionMessages = {
       "Leave blank for system trust. Certificate verification cannot be disabled.",
     compatibility: "Verified compatibility profile",
     unselected: "Not selected: connection checks only",
+    availableProfiles: "Available for this Desktop build",
+    historicalProfiles: "Historical records: unavailable for this build",
+    unavailableProfile: "Unavailable for this build",
+    profileContractMismatch:
+      "This profile uses a different API contract from this Desktop build. Select an available profile, save, and check the connection again.",
+    profileMissing:
+      "This Desktop does not include a qualification record for this profile. Select an available profile, save, and check the connection again.",
     compatibilityHint:
       "A profile identifies a tested Server build, not the identity of the remote binary. Check your deployment version.",
     save: "Save configuration",
@@ -242,14 +256,19 @@ export const connectionMessages = {
 };
 export function connectionError(error: unknown, language: "zh" | "en"): string {
   const text = connectionMessages[language];
+  const code = connectionErrorCode(error);
+  const key = code === "storage" ? "storage_error" : code;
+  return typeof key === "string" && Object.hasOwn(text, key)
+    ? text[key as keyof typeof text]
+    : text.error;
+}
+
+export function connectionErrorCode(error: unknown): string | null {
   const code =
     typeof error === "string"
       ? error
       : error && typeof error === "object" && "code" in error
         ? error.code
         : null;
-  const key = code === "storage" ? "storage_error" : code;
-  return typeof key === "string" && Object.hasOwn(text, key)
-    ? text[key as keyof typeof text]
-    : text.error;
+  return typeof code === "string" ? code : null;
 }

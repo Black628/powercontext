@@ -22,9 +22,12 @@ import type {
   StorageChoice,
   Fact,
 } from "../generated/ipc";
+import { contractSha256 } from "../generated/operations";
 import { desktopApi } from "../shared/ipc";
 import { connectionMessages, connectionError } from "./connection-messages";
 import { messages, type Language } from "./messages";
+import { PageFeedback, ErrorFeedback } from "./PageFeedback";
+import { useConfirmation } from "./useConfirmation";
 import connectionsIcon from "../assets/connections.svg";
 
 type Props = {
@@ -32,10 +35,22 @@ type Props = {
   language: Language;
   onState: (value: DesktopState) => void;
   onDirty: (value: boolean) => void;
+  onPendingChange?: (pending: boolean) => void;
+  initialProfileId?: string;
 };
-export function Connections({ state, language, onState, onDirty }: Props) {
+export function Connections({
+  state,
+  language,
+  onState,
+  onDirty,
+  onPendingChange,
+  initialProfileId,
+}: Props) {
   const t = connectionMessages[language];
-  const [selected, setSelected] = useState<string | null>(null);
+  const { confirm, confirmation } = useConfirmation(language);
+  const [selected, setSelected] = useState<string | null>(
+    initialProfileId ?? null,
+  );
   const profile = state?.profiles.find((p) => p.id === selected);
   const report = state?.reports.find((r) => r.connectionId === selected);
   const [name, setName] = useState("");
@@ -75,7 +90,9 @@ export function Connections({ state, language, onState, onDirty }: Props) {
     invalidated.current = false;
   }
   useEffect(() => {
-    reset(profile);
+    // A response from an earlier editor can update this revision after remount.
+    // Only refresh a clean form; newer input keeps its discard guard.
+    if (!dirty) reset(profile);
   }, [selected, profile?.revision]);
   function change(target = false) {
     setDirty(true);
@@ -85,12 +102,17 @@ export function Connections({ state, language, onState, onDirty }: Props) {
       setSecret("");
       if (profile && !invalidated.current) {
         invalidated.current = true;
-        void desktopApi.invalidate(profile.id).then(onState).catch(setError);
+        onPendingChange?.(true);
+        void desktopApi
+          .invalidate(profile.id)
+          .then(onState)
+          .catch(setError)
+          .finally(() => onPendingChange?.(false));
       }
     }
   }
-  function select(id: string | null) {
-    if (dirty && !window.confirm(t.discard)) return;
+  async function select(id: string | null) {
+    if (dirty && !(await confirm(t.discard))) return;
     setSecret("");
     setSelected(id);
     reset(state?.profiles.find((p) => p.id === id));
@@ -99,6 +121,7 @@ export function Connections({ state, language, onState, onDirty }: Props) {
     const ticket = lifetime.current;
     setBusy(true);
     setError(null);
+    onPendingChange?.(true);
     try {
       const next = await work();
       onState(next);
@@ -111,6 +134,7 @@ export function Connections({ state, language, onState, onDirty }: Props) {
         /* Keep the explicit failure visible. */
       }
     } finally {
+      onPendingChange?.(false);
       if (ticket === lifetime.current) setBusy(false);
     }
   }
@@ -155,8 +179,21 @@ export function Connections({ state, language, onState, onDirty }: Props) {
     (profile.credentialState === "stored" ||
       profile.credentialState === "session_only") &&
     !invalidated.current;
+  const availableProfiles = state?.compatibilityProfiles.filter(
+    (p) => p.contractSha256 === contractSha256,
+  );
+  const historicalProfiles = state?.compatibilityProfiles.filter(
+    (p) => p.contractSha256 !== contractSha256,
+  );
+  const selectedCompatibility = state?.compatibilityProfiles.find(
+    (p) => p.id === compatibility,
+  );
+  const unavailableCompatibility =
+    compatibility !== "" &&
+    selectedCompatibility?.contractSha256 !== contractSha256;
   return (
     <div className="connection-grid">
+      {confirmation}
       <section className="card stack">
         <div className="card-heading">
           <h2>{t.savedConnections}</h2>
@@ -170,7 +207,13 @@ export function Connections({ state, language, onState, onDirty }: Props) {
           </button>
         </div>
         {state && state.profiles.length === 0 && (
-          <p>{messages[language].noConnections}</p>
+          <PageFeedback
+            compact
+            kind="empty"
+            title={messages[language].noConnections}
+          >
+            <p>{messages[language].connectionsEmptyHint}</p>
+          </PageFeedback>
         )}
         <ul className="profile-list">
           {state?.profiles.map((p) => (
@@ -206,9 +249,14 @@ export function Connections({ state, language, onState, onDirty }: Props) {
           {isActive && <span className="badge success">{t.activeBadge}</span>}
         </div>
         {dirty && <p role="status">{t.dirty}</p>}
-        {error != null && (
-          <p role="alert">{connectionError(error, language)}</p>
+        {busy && (
+          <PageFeedback
+            compact
+            kind="loading"
+            title={messages[language].operationPending}
+          />
         )}
+        {error != null && <ErrorFeedback error={error} language={language} />}
         <fieldset disabled={busy || !state} className="profile-form">
           <label>
             {t.name}
@@ -315,14 +363,45 @@ export function Connections({ state, language, onState, onDirty }: Props) {
               }}
             >
               <option value="">{t.unselected}</option>
-              {state?.compatibilityProfiles.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.id}
+              {!!availableProfiles?.length && (
+                <optgroup label={t.availableProfiles}>
+                  {availableProfiles.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.id}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {!!historicalProfiles?.length && (
+                <optgroup label={t.historicalProfiles}>
+                  {historicalProfiles.map((p) => (
+                    <option key={p.id} value={p.id} disabled>
+                      {p.id} ({t.unavailableProfile})
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {compatibility && !selectedCompatibility && (
+                <option value={compatibility} disabled>
+                  {compatibility} ({t.unavailableProfile})
                 </option>
-              ))}
+              )}
             </select>
           </label>
           <p className="field-hint">{t.compatibilityHint}</p>
+          {unavailableCompatibility && (
+            <PageFeedback
+              compact
+              kind="error"
+              title={
+                selectedCompatibility
+                  ? t.profileContractMismatch
+                  : t.profileMissing
+              }
+            >
+              <p>{messages[language].recoverCompatibility}</p>
+            </PageFeedback>
+          )}
           <details>
             <summary>{t.ca}</summary>
             <label>
@@ -349,8 +428,8 @@ export function Connections({ state, language, onState, onDirty }: Props) {
               {t.save}
             </button>
             <button
-              onClick={() => {
-                if (!dirty || window.confirm(t.discard)) reset(profile);
+              onClick={async () => {
+                if (!dirty || (await confirm(t.discard))) reset(profile);
               }}
             >
               {t.cancel}
@@ -452,9 +531,9 @@ export function Connections({ state, language, onState, onDirty }: Props) {
               <button
                 className="link-danger"
                 disabled={busy}
-                onClick={() => {
-                  if (dirty && !window.confirm(t.discard)) return;
-                  if (window.confirm(t.removeConfirm))
+                onClick={async () => {
+                  if (dirty && !(await confirm(t.discard))) return;
+                  if (await confirm(t.removeConfirm))
                     void action(() =>
                       desktopApi.remove(profile.id, profile.revision),
                     ).then((next) => {

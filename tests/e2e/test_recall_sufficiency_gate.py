@@ -118,6 +118,7 @@ class _RecallRoundLog:
             admission: Any,
             reuse: Any,
             topic_reuse: Any,
+            excluded_memory: Any,
         ) -> Any:
             log.calls.append({"families": set(families), "admission": admission})
             if log.empty_from is not None and len(log.calls) >= log.empty_from:
@@ -131,6 +132,7 @@ class _RecallRoundLog:
                 admission=admission,
                 reuse=reuse,
                 topic_reuse=topic_reuse,
+                excluded_memory=excluded_memory,
             )
             log.calls[-1]["memory_recoverable"] = result.memory_recoverable
             log.calls[-1]["memory_texts"] = tuple(hit.text for group in result.memory for hit in group.hits)
@@ -310,6 +312,12 @@ def test_sqlite_vector_prepare_reports_cosine_and_expands_past_a_weak_top(tmp_pa
         ) as runtime:
             scope_id = await _create_scope(runtime, "vector-gate")
             await _seed(runtime, scope_id, ["alpha beta gamma vector evidence", "unrelated vector evidence"])
+            # SQLite's optional math functions are not part of the backend requirements.
+            provider = cast(Any, runtime._provider)
+            async with provider.database.transaction() as connection:
+                driver = (await connection.get_raw_connection()).driver_connection
+                assert driver is not None
+                await driver.create_function("power", 2, None)
             build, effort = await _prepare_build(runtime, scope_id, _memory_request())
 
         # weak-top-1 is not terminal: the recoverable below-floor hit is re-admitted by one
@@ -771,8 +779,6 @@ def test_topic_embedding_timeout_is_paid_once_per_prepare(tmp_path, monkeypatch)
             assert runtime._topic_memory_search is not None
             runtime._topic_memory_searcher = TopicMemorySearcher(
                 search=runtime._topic_memory_search,
-                get=runtime._topic_memory_get,
-                browse=runtime._topic_memory_browse,
                 embedding_model=embedding,
                 observer=runtime._topic_memory_search_observer,
             )
@@ -894,6 +900,7 @@ def test_memory_head_change_during_expansion_fails_open_to_round_zero(tmp_path, 
             admission: Any,
             reuse: Any,
             topic_reuse: Any,
+            excluded_memory: Any,
         ) -> Any:
             nonlocal calls
             calls += 1
@@ -907,6 +914,7 @@ def test_memory_head_change_during_expansion_fails_open_to_round_zero(tmp_path, 
                     admission=admission,
                     reuse=reuse,
                     topic_reuse=topic_reuse,
+                    excluded_memory=excluded_memory,
                 )
             raise AtomicMemoryConflictError("Memory changed while expanding retrieval")  # noqa: TRY003
 
@@ -992,6 +1000,7 @@ def test_later_round_failure_preserves_committed_expansion(tmp_path, monkeypatch
             admission: Any,
             reuse: Any,
             topic_reuse: Any,
+            excluded_memory: Any,
         ) -> Any:
             nonlocal calls
             calls += 1
@@ -1006,6 +1015,7 @@ def test_later_round_failure_preserves_committed_expansion(tmp_path, monkeypatch
                 admission=admission,
                 reuse=reuse,
                 topic_reuse=topic_reuse,
+                excluded_memory=excluded_memory,
             )
             if calls == 2:
                 return _RecallRoundOutcome(

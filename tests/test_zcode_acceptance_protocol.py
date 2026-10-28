@@ -37,7 +37,74 @@ from powercontext.builtin.artifacts.atomic_memory.reconciliation import (
 from powercontext.builtin.inference.pydantic_ai import PydanticAIStructuredGenerator
 from powercontext.sources import SourceRef
 
-from .e2e.zcode_acceptance.protocol import CaptureResponseGate, HostModelFixture, ObserveServer, WireEvidence
+from .e2e.zcode_acceptance.protocol import (
+    CaptureResponseGate,
+    HostModelFixture,
+    ObserveServer,
+    WireEvidence,
+    decode_response,
+)
+
+
+@pytest.mark.parametrize("streamed", [False, True], ids=["json", "sse"])
+def test_wire_decoder_preserves_json_rpc_errors(streamed):
+    response = {"jsonrpc": "2.0", "id": 7, "error": {"code": -32603, "message": "Synthetic tool failure"}}
+    encoded = json.dumps(response)
+    raw = ("event: message\ndata: " + encoded + "\n\n") if streamed else encoded
+
+    assert decode_response(raw.encode()) == response
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"result": {"isError": False}},
+        {"result": {"isError": True}},
+        {"error": {"code": -32603, "message": "Synthetic tool failure"}},
+    ],
+)
+def test_wire_tool_calls_exclude_redirects_and_preserve_matching_rpc_errors(response):
+    wire = WireEvidence()
+    request = {"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "replace_artifact"}}
+    redirect = {"path": "/mcp", "status": 307, "request": request, "response": {}}
+    unrelated = {
+        "path": "/mcp/",
+        "status": 200,
+        "request": request,
+        "response": {"jsonrpc": "2.0", "id": 8, **response},
+    }
+    executed = {
+        "path": "/mcp/",
+        "status": 200,
+        "request": request,
+        "response": {"jsonrpc": "2.0", "id": 7, **response},
+    }
+    wire.records.extend([redirect, unrelated, executed])
+
+    assert wire.calls("replace_artifact") == [executed]
+
+
+@pytest.mark.parametrize("tool", ["pc_work_contract", "Bash", "mcp__powercontext__create_work_contract"])
+def test_controlled_model_drives_native_catalog_names(tool: str) -> None:
+    async def check() -> None:
+        model = HostModelFixture()
+        operation = "create_work_contract" if tool.startswith("mcp__") else tool
+        model.plan([(operation, {"source_id": "synthetic-contract"})])
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=model.app), base_url="http://fixture") as client:
+            response = await client.post(
+                "/v1/chat/completions",
+                json={
+                    "model": "fixture",
+                    "messages": [],
+                    "tools": [{"type": "function", "function": {"name": tool}}],
+                },
+            )
+        response.raise_for_status()
+        call = response.json()["choices"][0]["message"]["tool_calls"][0]
+        assert call["function"]["name"] == tool
+        assert json.loads(call["function"]["arguments"]) == {"source_id": "synthetic-contract"}
+
+    asyncio.run(check())
 
 
 def capture_app(writes: list[str], *, reject: bool = False) -> ASGIApp:
