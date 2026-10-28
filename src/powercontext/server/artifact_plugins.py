@@ -119,8 +119,6 @@ class ArtifactPluginManager:
     async def __aenter__(self):
         async with self.database.transaction() as connection:
             families = (await connection.execute(select(_SCHEMAS.c.family).distinct())).scalars().all()
-            for family in families:
-                register_custom_artifact_access_family(family)
             rows = (await connection.execute(select(_STATES).where(_STATES.c.plugin_id.is_not(None)))).mappings().all()
             restored = []
             for persisted in rows:

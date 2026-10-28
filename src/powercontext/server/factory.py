@@ -24,6 +24,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, Response
 from fastapi.routing import APIRoute
+from sqlalchemy import select
 from starlette.middleware import Middleware
 
 from powercontext._logging import log_safely
@@ -38,6 +39,7 @@ from powercontext.builtin.dream.generation import DreamGenerator
 from powercontext.builtin.inference import EmbeddingModel
 from powercontext.builtin.persistence.records import RelationalRecordService
 from powercontext.builtin.persistence.sqlite import SQLiteConfig
+from powercontext.builtin.persistence.tables import ARTIFACT_FAMILY_SCHEMAS_TABLE
 from powercontext.builtin.records import BaseOperationNotSupportedError
 from powercontext.builtin.runtime import (
     BuiltinRuntime,
@@ -77,6 +79,7 @@ from powercontext.server.authz import (
     access_control_for_mode,
 )
 from powercontext.server.authz.composition import open_builtin_access_control
+from powercontext.server.authz.profiles import register_custom_artifact_access_family
 from powercontext.server.authz.repository import RelationalAccessRepository
 from powercontext.server.context import current_principal, current_request_id
 from powercontext.server.cursor_secret import resolve_cursor_secret
@@ -274,14 +277,15 @@ def create_server_app(  # noqa: C901
             identity_repository = ServerIdentityRepository(runtime.primary_database)
             await identity_repository.initialize()
             server_id = await identity_repository.load_or_create()
+            records = runtime._records()
+            if not isinstance(records, RelationalRecordService):
+                raise TypeError("Artifact plugins require relational record storage")  # noqa: TRY003
+            await _restore_artifact_access_profiles(records)
             _bind_evidence_access(runtime, active_access_control, resolved.access.mode)
             if (
                 config.runtime.artifact_processing_supervisor_mode == "global"
                 and config.runtime.artifact_processing_role != "api"
             ):
-                records = runtime._records()
-                if not isinstance(records, RelationalRecordService):
-                    raise TypeError("Artifact plugins require relational record storage")  # noqa: TRY003
 
                 def bind_plugin_supervisor(supervisors) -> None:
                     runtime.artifact_processing_supervisor = supervisors
@@ -429,6 +433,14 @@ def create_server_app(  # noqa: C901
     if resolved.dashboard.enabled:
         mount_dashboard(app)
     return app
+
+
+async def _restore_artifact_access_profiles(records: RelationalRecordService) -> None:
+    """Restore retained family access even when this process runs no plugin manager."""
+    async with records.database.transaction() as connection:
+        families = (await connection.execute(select(ARTIFACT_FAMILY_SCHEMAS_TABLE.c.family).distinct())).scalars().all()
+    for family in families:
+        register_custom_artifact_access_family(family)
 
 
 def _state_access_checks(app: FastAPI) -> Callable[[], Awaitable[Mapping[str, str]]]:
