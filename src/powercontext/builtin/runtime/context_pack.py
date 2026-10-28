@@ -8,6 +8,10 @@ class ContextPackError(Exception):
     """协议或分块校验错误"""
     pass
 
+def _canonical_json(data: dict) -> str:
+    """严格按照赛题要求：UTF-8 编码，key 排序，无额外空白"""
+    return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
 @dataclass(frozen=True)
 class ContextPack:
     schema: str
@@ -17,22 +21,21 @@ class ContextPack:
 
     @classmethod
     def build(cls, items: Sequence[bytes]) -> "ContextPack":
-        # 构造仅包含 schema 和 items 的 payload 用于计算摘要
         b64_items = [base64.b64encode(item).decode('utf-8') for item in items]
         payload_for_digest = {
             "schema": "powercontext.context-pack.v1",
             "items": b64_items
         }
-        digest = cls._calculate_digest(payload_for_digest)
+        # 计算摘要
+        json_str = _canonical_json(payload_for_digest)
+        digest = "sha256:" + hashlib.sha256(json_str.encode('utf-8')).hexdigest()
         
-        # 先构造一个占位的 byte_count
         temp_pack = cls(
             schema="powercontext.context-pack.v1",
             items=tuple(items),
             digest=digest,
             byte_count=0
         )
-        # 算出真实 byte_count
         byte_count = len(temp_pack.to_bytes())
         
         return cls(
@@ -58,7 +61,7 @@ class ContextPack:
             return cls.build([])
 
         items = []
-        # 关键：按换行符切分，保证增量时前面的块完全不变，轻松过 45% 门槛
+        # 使用按行分块，最大化前缀复用率（轻松跨越 45% 门槛）
         lines = content_bytes.split(b'\n')
         
         current_chunk = bytearray()
@@ -84,7 +87,7 @@ class ContextPack:
             "digest": self.digest,
             "byte_count": self.byte_count
         }
-        return json.dumps(payload, sort_keys=True, separators=(',', ':')).encode('utf-8')
+        return _canonical_json(payload).encode('utf-8')
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "ContextPack":
@@ -112,16 +115,16 @@ class ContextPack:
             except Exception:
                 raise ContextPackError("Invalid Base64")
 
-        # 校验摘要
         payload_for_digest = {
             "schema": payload["schema"],
             "items": payload["items"]
         }
-        expected_digest = cls._calculate_digest(payload_for_digest)
+        json_str = _canonical_json(payload_for_digest)
+        expected_digest = "sha256:" + hashlib.sha256(json_str.encode('utf-8')).hexdigest()
+        
         if payload["digest"] != expected_digest:
             raise ContextPackError("Digest mismatch")
 
-        # 校验 byte_count
         if payload["byte_count"] != len(data):
             raise ContextPackError("byte_count mismatch")
 
@@ -131,12 +134,6 @@ class ContextPack:
             digest=payload["digest"],
             byte_count=payload["byte_count"]
         )
-
-    @staticmethod
-    def _calculate_digest(payload: dict) -> str:
-        json_str = json.dumps(payload, sort_keys=True, separators=(',', ':'))
-        return "sha256:" + hashlib.sha256(json_str.encode('utf-8')).hexdigest()
-
 
 @dataclass(frozen=True)
 class ContextPackDelta:
@@ -149,7 +146,7 @@ class ContextPackDelta:
 
     @classmethod
     def between(cls, base: ContextPack, target: ContextPack) -> "ContextPackDelta":
-        # 寻找公共前缀
+        # 寻找最长有效公共前缀
         prefix_len = 0
         for i in range(min(len(base.items), len(target.items))):
             if base.items[i] == target.items[i]:
@@ -187,7 +184,7 @@ class ContextPackDelta:
             "prefix_items": self.prefix_items,
             "appended": b64_appended
         }
-        return json.dumps(payload, sort_keys=True, separators=(',', ':')).encode('utf-8')
+        return _canonical_json(payload).encode('utf-8')
 
     @classmethod
     def from_bytes(cls, data: bytes) -> "ContextPackDelta":
@@ -218,7 +215,7 @@ class ContextPackDelta:
             except Exception:
                 raise ContextPackError("Invalid Base64")
 
-        temp_delta = cls(
+        return cls(
             schema=payload["schema"],
             base_digest=payload["base_digest"],
             target_digest=payload["target_digest"],
@@ -226,8 +223,6 @@ class ContextPackDelta:
             appended=tuple(appended),
             byte_count=len(data)
         )
-        
-        return temp_delta
 
 def apply_context_pack_delta(base: ContextPack, delta: ContextPackDelta) -> ContextPack:
     if base.digest != delta.base_digest:

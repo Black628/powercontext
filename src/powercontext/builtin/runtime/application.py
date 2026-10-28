@@ -14,6 +14,7 @@
 
 """Business-specific Runtime operations over composed built-in contexts."""
 
+
 from __future__ import annotations
 
 import asyncio
@@ -858,48 +859,34 @@ class ScopedContextApplication:
         authorize_scopes: Callable[[tuple[str, ...]], Awaitable[None]] | None = None,
         atomic_context: ArtifactSearchExecutionContext | None = None,
     ) -> ContextPack | ContextPackDelta:
-        import json
-        from dataclasses import asdict, is_dataclass
-        
-        # 1. 调用普通的 prepare
-        prepared_context = await self.prepare(
-            request,
-            authorize_scopes=authorize_scopes,
-            atomic_context=atomic_context
-        )
-        
-        # 2. 提取正文
-        content_str = ""
-        
-        # 处理空结果
-        if getattr(prepared_context, "status", "") == "empty" or getattr(prepared_context, "content_bytes", 1) == 0:
-            content_str = ""
-        else:
-            try:
-                # 如果是 Pydantic 模型（最常见）
-                if hasattr(prepared_context, "model_dump_json"):
-                    content_str = prepared_context.model_dump_json()
-                # 如果是 dataclass
-                elif is_dataclass(prepared_context):
-                    content_str = json.dumps(asdict(prepared_context), default=str, sort_keys=True)
-                # 如果有 dict 方法
-                elif hasattr(prepared_context, "dict"):
-                    content_str = json.dumps(prepared_context.dict(), default=str, sort_keys=True)
-                # 兜底
-                else:
-                    content_str = str(prepared_context)
-            except Exception as e:
-                # 就算序列化失败，也要用字符串兜底，保证代码不崩
-                content_str = str(prepared_context)
+        from dataclasses import replace
+        from powercontext.builtin.runtime.context_pack import ContextPack, ContextPackDelta
 
-        # 3. 生成 target pack
-        target_pack = ContextPack.from_content(content_str)
-        
-        # 4. 返回首轮或增量
-        if base_pack is None:
-            return target_pack
+        async with self._runtime._scope_operation(self.scope_id) as scope:
+            # 处理空请求直接返回空包装的逻辑
+            if request.assembly is not None and not request.assembly.sections and not request.include_code:
+                target_pack = ContextPack.from_content(None)
+                if base_pack is None:
+                    return target_pack
+                return ContextPackDelta.between(base_pack, target_pack)
+
+            if authorize_scopes is not None:
+                await authorize_scopes((self.scope_id, *scope.context_references))
             
-        return ContextPackDelta.between(base_pack, target_pack)
+            # 精准提取底层 Build，拿到确切的 content 字段
+            build, _ = await self._prepare_build(request, scope)
+            prepared_context = build.context
+            content_str = prepared_context.content
+            
+            if prepared_context.status == "empty" or content_str is None:
+                content_str = ""
+
+            target_pack = ContextPack.from_content(content_str)
+            
+            if base_pack is None:
+                return target_pack
+                
+            return ContextPackDelta.between(base_pack, target_pack)
     
     async def _prepare(self, request: PrepareContextRequest, scope: ScopeDescriptor, /) -> PreparedContext:
         build, effort = await self._prepare_build(request, scope)
