@@ -1,0 +1,1 @@
+为 apply_discount 增加 min_total 金额门槛筛选：订单总额低于 min_total 时不应用折扣、直接返回原价，不低于时才按 rate 打折；min_total 必须为正数，缺省 None 时保持 v1 的整单折扣行为。

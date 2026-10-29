@@ -1,0 +1,39 @@
+{
+  "_comment": "验证样例的预期结果。由 scripts/check_expected.py 对 .state/context/context.json 与 records/ 做机检。",
+  "task": {
+    "file": "sample/task.txt",
+    "keywords": ["apply_discount", "min_total", "门槛"]
+  },
+  "context": {
+    "specs_must_contain": [
+      {"doc_key": "spec:specs/discount.md#SPEC-02", "must_contain": ["min_total", "SPEC-02"], "reason": "v2 新增的门槛筛选规格"},
+      {"doc_key": "spec:specs/discount.md#SPEC-03", "must_contain": ["兼容"], "reason": "兼容性规格（回归测试依据）"}
+    ],
+    "code_must_contain": [
+      {"doc_key": "code:inventory/discount.py#apply_discount", "must_contain": ["def apply_discount"], "reason": "待修改的函数本体"}
+    ],
+    "tests_must_contain": [
+      {"doc_key": "test:tests/test_discount_target.py#MinTotalTargetTest.test_below_threshold_returns_order_total", "must_contain": ["min_total"], "reason": "目标功能测试"},
+      {"doc_key": "test:tests/test_discount_regression.py#DiscountRegressionTest.test_apply_discount_default_rate", "must_contain": ["apply_discount"], "reason": "回归测试（由 sdd.json always_include_tests 钉住）"}
+    ],
+    "checks_all_true": ["specs_hit", "code_hit_apply_discount", "tests_hit", "spec_mentions_min_total"],
+    "sources_format": "path:lineStart-lineEnd",
+    "state_backend": "powercontext"
+  },
+  "spec_update": {
+    "v1_spec_file": "sample/specs/discount.v1.md",
+    "v2_spec_file": "sample/specs/discount.v2.md",
+    "v1_must_not_contain": ["v2 新增"],
+    "v2_must_contain": ["v2 新增", "min_total"],
+    "note": "v1 与 v2 的上下文正文必须不同；差异来自重新 index 后真查库，不是写死"
+  },
+  "verify": {
+    "before": {"target_exit_code_nonzero": true, "regression_exit_code": 0, "reason": "目标测试因 min_total 参数未实现而失败"},
+    "after": {"target_exit_code": 0, "regression_exit_code": 0, "full_exit_code": 0}
+  },
+  "artifacts": {
+    "patch_files": ["records/patches/*.diff", "sample/offline_patch.diff", "demo_project/patch/fix.diff"],
+    "records": ["records/minimax.jsonl", "records/seekdb-queries.md", "records/powercontext.md", "records/test-logs/index.json"],
+    "state_reuse": "records/demo-run-latest.json 中 state-reload-after-restart 步骤 status=ok"
+  }
+}

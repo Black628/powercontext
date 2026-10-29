@@ -1,0 +1,7 @@
+{
+  "_comment": "SDD 索引配置：specs/code/tests 三组的 glob 模式，相对工程根目录。",
+  "specs": ["specs/**/*.md"],
+  "code": ["inventory/**/*.py"],
+  "tests": ["tests/**/*.py"],
+  "always_include_tests": ["tests/test_discount_regression.py"]
+}

@@ -1,0 +1,10 @@
+{
+  "ts": "2026-10-29T20:18:29+0800",
+  "status": "error",
+  "http_status": 404,
+  "model": "MiniMax-M2.7",
+  "endpoint": "https://api.minimaxi.com/v1/chat/completions",
+  "error": "HTTP 404 <- https://api.minimaxi.com/v1/chat/completions: {\"type\":\"error\",\"error\":{\"type\":\"not_found_error\",\"message\":\"The model \\\"MiniMax-M2.7\\\" is no longer available. (2069)\",\"http_code\":\"404\"},\"request_id\":\"07326c94ca55ce5eaf8a32ea4d0f421a\"}",
+  "raw_error_body": "{\"type\":\"error\",\"error\":{\"type\":\"not_found_error\",\"message\":\"The model \\\"MiniMax-M2.7\\\" is no longer available. (2069)\",\"http_code\":\"404\"},\"request_id\":\"07326c94ca55ce5eaf8a32ea4d0f421a\"}",
+  "note": "本次调用被上游拒绝，没有模型输出；不是 patch"
+}

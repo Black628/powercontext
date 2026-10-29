@@ -1,0 +1,18 @@
+# phase=before suite=regression
+# command: C:\Users\32196\AppData\Local\Programs\Python\Python312\python.exe -m unittest discover -s tests -t . -p test_discount_regression.py -v
+# cwd: D:\Deep seek文件\deepseek\powercontext\minimax\demo_project
+# exit_code: 0
+# result: OK
+
+test_apply_discount_custom_rate (tests.test_discount_regression.DiscountRegressionTest.test_apply_discount_custom_rate) ... ok
+test_apply_discount_default_rate (tests.test_discount_regression.DiscountRegressionTest.test_apply_discount_default_rate) ... ok
+test_empty_order (tests.test_discount_regression.DiscountRegressionTest.test_empty_order) ... ok
+test_invalid_rate_raises (tests.test_discount_regression.DiscountRegressionTest.test_invalid_rate_raises) ... ok
+test_line_total (tests.test_discount_regression.DiscountRegressionTest.test_line_total) ... ok
+test_order_total_sums_lines (tests.test_discount_regression.DiscountRegressionTest.test_order_total_sums_lines) ... ok
+test_rounding_half_up_two_decimals (tests.test_discount_regression.DiscountRegressionTest.test_rounding_half_up_two_decimals) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.000s
+
+OK

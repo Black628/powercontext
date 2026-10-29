@@ -1,0 +1,102 @@
+[
+  {
+    "ts": "2026-10-29T20:17:05+0800",
+    "phase": "before",
+    "summary_file": "D:\\Deep seek文件\\deepseek\\powercontext\\minimax\\records\\test-logs\\before-20261029-201704.md",
+    "suites": {
+      "target": {
+        "exit_code": 1,
+        "ran": 6,
+        "result": "FAILED (errors=6)",
+        "ok": false
+      },
+      "regression": {
+        "exit_code": 0,
+        "ran": 7,
+        "result": "OK",
+        "ok": true
+      },
+      "full": {
+        "exit_code": 1,
+        "ran": 13,
+        "result": "FAILED (errors=6)",
+        "ok": false
+      }
+    }
+  },
+  {
+    "ts": "2026-10-29T20:17:37+0800",
+    "phase": "after",
+    "summary_file": "D:\\Deep seek文件\\deepseek\\powercontext\\minimax\\records\\test-logs\\after-20261029-201737.md",
+    "suites": {
+      "target": {
+        "exit_code": 0,
+        "ran": 6,
+        "result": "OK",
+        "ok": true
+      },
+      "regression": {
+        "exit_code": 0,
+        "ran": 7,
+        "result": "OK",
+        "ok": true
+      },
+      "full": {
+        "exit_code": 0,
+        "ran": 13,
+        "result": "OK",
+        "ok": true
+      }
+    }
+  },
+  {
+    "ts": "2026-10-29T20:18:01+0800",
+    "phase": "before",
+    "summary_file": "D:\\Deep seek文件\\deepseek\\powercontext\\minimax\\records\\test-logs\\before-20261029-201801.md",
+    "suites": {
+      "target": {
+        "exit_code": 1,
+        "ran": 6,
+        "result": "FAILED (errors=6)",
+        "ok": false
+      },
+      "regression": {
+        "exit_code": 0,
+        "ran": 7,
+        "result": "OK",
+        "ok": true
+      },
+      "full": {
+        "exit_code": 1,
+        "ran": 13,
+        "result": "FAILED (errors=6)",
+        "ok": false
+      }
+    }
+  },
+  {
+    "ts": "2026-10-29T20:18:01+0800",
+    "phase": "after",
+    "summary_file": "D:\\Deep seek文件\\deepseek\\powercontext\\minimax\\records\\test-logs\\after-20261029-201801.md",
+    "suites": {
+      "target": {
+        "exit_code": 0,
+        "ran": 6,
+        "result": "OK",
+        "ok": true
+      },
+      "regression": {
+        "exit_code": 0,
+        "ran": 7,
+        "result": "OK",
+        "ok": true
+      },
+      "full": {
+        "exit_code": 0,
+        "ran": 13,
+        "result": "OK",
+        "ok": true
+      }
+    }
+  }
+]
