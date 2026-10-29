@@ -1,0 +1,11 @@
+# Recall 后端依赖（阶段 1）
+fastapi>=0.111
+uvicorn[standard]>=0.30
+pymysql>=1.1
+python-dotenv>=1.0
+requests>=2.31
+python-multipart>=0.0.9
+pypdf>=4.2
+
+# 可选：EMBEDDING_PROVIDER=sentence_transformers 时再安装（体积大，默认 hash 路线不需要）
+# sentence-transformers>=3.0
