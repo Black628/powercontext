@@ -14,12 +14,12 @@ from .store import get_conn
 
 logger = logging.getLogger("recall.search")
 
-# 向量近邻 SQL：COSINE_DISTANCE + APPROX 近似排序
+# 向量近邻 SQL：COSINE_DISTANCE + APPROXIMATE 近似排序（seekdb 语法）
 VECTOR_SQL = (
     "SELECT id, doc_id, doc_name, page, offset_in_doc, content,\n"
     "       COSINE_DISTANCE(embedding, %s) AS dist\n"
     "FROM   chunks\n"
-    "ORDER  BY dist APPROX\n"
+    "ORDER  BY dist APPROXIMATE\n"
     "LIMIT  %s"
 )
 
@@ -53,22 +53,22 @@ def _run(cur, sql: str, params: tuple) -> tuple:
 
 
 def vector_search(qvec: list, k: int) -> list:
-    """向量路：按余弦距离取最近 k 条；不支持 APPROX 关键字时退化重试。"""
+    """向量路：按余弦距离取最近 k 条；不支持 APPROXIMATE 关键字时退化重试。"""
     conn = get_conn()
     try:
         with conn.cursor() as cur:
-            t0 = time.perf_counter()
+            sql = VECTOR_SQL
             try:
-                rows, cost = _run(cur, VECTOR_SQL, (embed.vector_to_sql(qvec), k))
-            except pymysql.err.ProgrammingError as e:
-                # 部分版本不认 APPROX，改用精确排序（语义等价，只是慢）
-                logger.warning("[向量路] APPROX 不受支持(%s)，改用精确 ORDER BY", e.args[1] if e.args else e)
-                fallback = VECTOR_SQL.replace("dist APPROX", "dist")
-                rows, cost = _run(cur, fallback, (embed.vector_to_sql(qvec), k))
-            # —— 证据日志：SQL 原文 + 耗时 ——
+                rows, cost = _run(cur, sql, (embed.vector_to_sql(qvec), k))
+            except pymysql.err.MySQLError as e:
+                # 部分版本不认 APPROXIMATE，改用精确排序（语义等价，只是慢）
+                logger.warning("[向量路] APPROXIMATE 不受支持(%s)，改用精确 ORDER BY", e.args[1] if len(e.args) > 1 else e)
+                sql = VECTOR_SQL.replace(" APPROXIMATE", "")
+                rows, cost = _run(cur, sql, (embed.vector_to_sql(qvec), k))
+            # —— 证据日志：实际执行的 SQL 原文 + 耗时 ——
             logger.info(
                 "[向量路] SQL:\n%s\n参数: qvec=%s, k=%d\n耗时: %.1f ms | 命中: %d 条",
-                VECTOR_SQL, _preview_vec(qvec), k, cost, len(rows),
+                sql, _preview_vec(qvec), k, cost, len(rows),
             )
             return rows
     finally:

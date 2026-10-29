@@ -18,9 +18,8 @@ CREATE TABLE IF NOT EXISTS chunks (
   embedding    VECTOR(384),
   created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   FULLTEXT INDEX ft_content(content) WITH PARSER ik,
-  -- 部分 seekdb 版本要求显式声明距离与算法，如报错可改为：
-  -- VECTOR INDEX vidx(embedding) WITH (distance=cosine, type=hnsw, lib=vsag)
-  VECTOR INDEX vidx(embedding)
+  -- seekdb 要求向量索引显式声明参数；缺少参数会报 1235
+  VECTOR INDEX vidx(embedding) WITH (distance=cosine, type=hnsw, lib=vsag)
 ) DEFAULT CHARSET = utf8mb4;
 
 -- 文档登记表：记录上传文档与索引状态（GET /api/docs 使用）

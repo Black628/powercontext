@@ -25,18 +25,26 @@ SEEKDB_DATABASE = os.getenv("SEEKDB_DATABASE", "recall")
 
 
 def get_conn(database: str = None):
-    """创建一个 seekdb 连接（utf8mb4、自动提交）。"""
+    """创建一个 seekdb 连接（utf8mb4、自动提交）。
+
+    database=None 使用 SEEKDB_DATABASE；传空串表示不指定库（建库前需要）。
+    """
+    db = SEEKDB_DATABASE if database is None else database
     return pymysql.connect(
         host=SEEKDB_HOST,
         port=SEEKDB_PORT,
         user=SEEKDB_USER,
         password=SEEKDB_PASSWORD,
-        database=database or SEEKDB_DATABASE,
+        database=db or None,
         charset="utf8mb4",
         autocommit=True,
         cursorclass=pymysql.cursors.DictCursor,
     )
 
+
+_VECTOR_INDEX_DDL = (
+    ",\n  VECTOR INDEX vidx(embedding) WITH (distance=cosine, type=hnsw, lib=vsag)"
+)
 
 # chunks 表 DDL：与 scripts/init_seekdb.sql 保持一致，维度跟随 EMBEDDING_DIM
 _CHUNKS_DDL = """
@@ -49,15 +57,12 @@ CREATE TABLE IF NOT EXISTS chunks (
   content      TEXT         NOT NULL,
   embedding    VECTOR({dim}),
   created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  FULLTEXT INDEX ft_content(content) WITH PARSER ik,
-  VECTOR INDEX vidx(embedding)
+  FULLTEXT INDEX ft_content(content) WITH PARSER ik""" + _VECTOR_INDEX_DDL + """
 ) DEFAULT CHARSET = utf8mb4
 """
 
 # 降级 DDL：部分 seekdb 版本不支持表内 VECTOR INDEX 声明
-_CHUNKS_DDL_NO_VEC = _CHUNKS_DDL.replace(
-    ",\n  VECTOR INDEX vidx(embedding)", ""
-)
+_CHUNKS_DDL_NO_VEC = _CHUNKS_DDL.replace(_VECTOR_INDEX_DDL, "")
 
 _DOCS_DDL = """
 CREATE TABLE IF NOT EXISTS docs (
@@ -86,7 +91,7 @@ def _exec(cur, sql: str, args=None):
 
 def init_schema() -> None:
     """建库 + 建表；向量/全文索引语法不被支持时降级并告警。"""
-    conn = get_conn(database=None)
+    conn = get_conn(database="")
     try:
         with conn.cursor() as cur:
             _exec(cur, f"CREATE DATABASE IF NOT EXISTS {SEEKDB_DATABASE}")
