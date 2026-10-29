@@ -303,3 +303,70 @@
 - 最近 HTTP 往返：
   - `GET /health/live` -> HTTP 200
   - `POST /v1/memory/entries/list` -> HTTP 200
+
+### load @ 2026-10-29T20:31:53+0800  backend=powercontext
+
+- Server: `http://127.0.0.1:8001`
+- Scope: `scp_2atqz66t19qc1wwhn9r6ft83kk`（title `sdd-context:minimax`）
+- kind: `sdd_task_state`  task_id: `task-1f981635e347`
+- artifact_id: `art_9178e219aade482f9408e6be7f088a20`  revision: `1`
+- 已完成: ['建立 seekdb 索引（specs/code/tests 24 条切片）', '按 SPEC-02 实现 min_total 门槛筛选（离线参照 patch）', '目标测试与回归测试全部通过']
+- 待办: ['MiniMax 真实产出待账户额度恢复后重跑']
+- 验证记录: 1 条
+- 最近 HTTP 往返：
+  - `GET /health/live` -> HTTP 200
+  - `POST /v1/memory/entries/list` -> HTTP 200
+
+### load @ 2026-10-29T20:32:15+0800  backend=powercontext
+
+- Server: `http://127.0.0.1:8001`
+- Scope: `scp_2atqz66t19qc1wwhn9r6ft83kk`（title `sdd-context:minimax`）
+- kind: `sdd_task_state`  task_id: `task-1f981635e347`
+- artifact_id: `art_9178e219aade482f9408e6be7f088a20`  revision: `1`
+- 已完成: ['建立 seekdb 索引（specs/code/tests 24 条切片）', '按 SPEC-02 实现 min_total 门槛筛选（离线参照 patch）', '目标测试与回归测试全部通过']
+- 待办: ['MiniMax 真实产出待账户额度恢复后重跑']
+- 验证记录: 1 条
+- 最近 HTTP 往返：
+  - `GET /health/live` -> HTTP 200
+  - `POST /v1/memory/entries/list` -> HTTP 200
+
+### save @ 2026-10-29T20:32:15+0800  backend=powercontext
+
+- Server: `http://127.0.0.1:8001`
+- Scope: `scp_2atqz66t19qc1wwhn9r6ft83kk`（title `sdd-context:minimax`）
+- kind: `sdd_task_state`  task_id: `task-1f981635e347`
+- artifact_id: `art_5635ca5c0bc041108f4d3e0e752959c0`  revision: `1`
+- 已完成: ['建立 seekdb 索引（specs/code/tests 24 条切片）', '按 SPEC-02 实现 min_total 门槛筛选（离线参照 patch）', '目标测试与回归测试全部通过']
+- 待办: ['MiniMax 真实产出待账户额度恢复后重跑']
+- 验证记录: 2 条
+- 最近 HTTP 往返：
+  - `GET /health/live` -> HTTP 200
+  - `POST /v1/memory/entries/list` -> HTTP 200
+  - `POST /v1/memory/remember` -> HTTP 200
+
+### load @ 2026-10-29T20:32:47+0800  backend=powercontext
+
+- Server: `http://127.0.0.1:8001`
+- Scope: `scp_2atqz66t19qc1wwhn9r6ft83kk`（title `sdd-context:minimax`）
+- kind: `sdd_task_state`  task_id: `task-1f981635e347`
+- artifact_id: `art_5635ca5c0bc041108f4d3e0e752959c0`  revision: `1`
+- 已完成: ['建立 seekdb 索引（specs/code/tests 24 条切片）', '按 SPEC-02 实现 min_total 门槛筛选（离线参照 patch）', '目标测试与回归测试全部通过']
+- 待办: ['MiniMax 真实产出待账户额度恢复后重跑']
+- 验证记录: 2 条
+- 最近 HTTP 往返：
+  - `GET /health/live` -> HTTP 200
+  - `POST /v1/memory/entries/list` -> HTTP 200
+
+### save @ 2026-10-29T20:32:47+0800  backend=powercontext
+
+- Server: `http://127.0.0.1:8001`
+- Scope: `scp_2atqz66t19qc1wwhn9r6ft83kk`（title `sdd-context:minimax`）
+- kind: `sdd_task_state`  task_id: `task-1f981635e347`
+- artifact_id: `art_cb3cc338c78d46b997c46a8d6b55f1f7`  revision: `1`
+- 已完成: ['建立 seekdb 索引（specs/code/tests 24 条切片）', '按 SPEC-02 实现 min_total 门槛筛选（离线参照 patch）', '目标测试与回归测试全部通过']
+- 待办: ['MiniMax 真实产出待账户额度恢复后重跑']
+- 验证记录: 3 条
+- 最近 HTTP 往返：
+  - `GET /health/live` -> HTTP 200
+  - `POST /v1/memory/entries/list` -> HTTP 200
+  - `POST /v1/memory/remember` -> HTTP 200

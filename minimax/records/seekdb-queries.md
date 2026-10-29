@@ -1678,3 +1678,107 @@ SELECT kind, COUNT(*) FROM sdd_docs GROUP BY kind
 ```
 
 返回行数: 3
+
+### [1] 2026-10-29T20:31:53+0800  init-db: 建库
+
+```sql
+CREATE DATABASE IF NOT EXISTS `sdd_minimax` DEFAULT CHARACTER SET utf8mb4
+```
+
+返回行数: 1
+
+### [2] 2026-10-29T20:31:53+0800  init-db: 切换库
+
+```sql
+USE `sdd_minimax`
+```
+
+返回行数: 0
+
+### [3] 2026-10-29T20:31:53+0800  context: FULLTEXT 检索 kind=spec
+
+```sql
+SELECT doc_key, kind, path, line_start, line_end, symbol, content, MATCH(content, path, symbol) AGAINST(%s) AS score FROM sdd_docs WHERE MATCH(content, path, symbol) AGAINST(%s) AND kind = %s ORDER BY score DESC LIMIT %s  -- params: ('为 apply_discount 增加 min_total 金额门槛筛选：订单总额低于 min_total 时不应用折扣、直接返回原价，不低于时才按 rate 打折；min_total 必须为正数，缺省 None 时保持 v1 的整单折扣行为。 apply_discount min_total rate None', '为 apply_discount 增加 min_total 金额门槛筛选：订单总额低于 min_total 时不应用折扣、直接返回原价，不低于时才按 rate 打折；min_total 必须为正数，缺省 None 时保持 v1 的整单折扣行为。 apply_discount min_total rate None', 'spec', 5)
+```
+
+返回行数: 4
+
+### [4] 2026-10-29T20:31:53+0800  context: LIKE 兜底检索 kind=spec
+
+```sql
+SELECT doc_key, kind, path, line_start, line_end, symbol, content, 0 AS score FROM sdd_docs WHERE kind = %s AND ((content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s)) LIMIT %s  -- params: ['spec', '%apply_discount%', '%apply_discount%', '%apply_discount%', '%min_total%', '%min_total%', '%min_total%', '%rate%', '%rate%', '%rate%', '%None%', '%None%', '%None%', '%apply%', '%apply%', '%apply%', '%discount%', '%discount%', '%discount%', '%min%', '%min%', '%min%', '%total%', '%total%', '%total%', 5]
+```
+
+返回行数: 4
+
+### [5] 2026-10-29T20:31:53+0800  context: FULLTEXT 检索 kind=code
+
+```sql
+SELECT doc_key, kind, path, line_start, line_end, symbol, content, MATCH(content, path, symbol) AGAINST(%s) AS score FROM sdd_docs WHERE MATCH(content, path, symbol) AGAINST(%s) AND kind = %s ORDER BY score DESC LIMIT %s  -- params: ('为 apply_discount 增加 min_total 金额门槛筛选：订单总额低于 min_total 时不应用折扣、直接返回原价，不低于时才按 rate 打折；min_total 必须为正数，缺省 None 时保持 v1 的整单折扣行为。 apply_discount min_total rate None', '为 apply_discount 增加 min_total 金额门槛筛选：订单总额低于 min_total 时不应用折扣、直接返回原价，不低于时才按 rate 打折；min_total 必须为正数，缺省 None 时保持 v1 的整单折扣行为。 apply_discount min_total rate None', 'code', 6)
+```
+
+返回行数: 4
+
+### [6] 2026-10-29T20:31:53+0800  context: LIKE 兜底检索 kind=code
+
+```sql
+SELECT doc_key, kind, path, line_start, line_end, symbol, content, 0 AS score FROM sdd_docs WHERE kind = %s AND ((content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s)) LIMIT %s  -- params: ['code', '%apply_discount%', '%apply_discount%', '%apply_discount%', '%min_total%', '%min_total%', '%min_total%', '%rate%', '%rate%', '%rate%', '%None%', '%None%', '%None%', '%apply%', '%apply%', '%apply%', '%discount%', '%discount%', '%discount%', '%min%', '%min%', '%min%', '%total%', '%total%', '%total%', 6]
+```
+
+返回行数: 5
+
+### [7] 2026-10-29T20:31:53+0800  context: 符号精确命中 kind=code
+
+```sql
+SELECT doc_key, kind, path, line_start, line_end, symbol, content, 1.0 AS score FROM sdd_docs WHERE kind = %s AND symbol IN (%s,%s,%s,%s) LIMIT %s  -- params: ['code', 'apply_discount', 'min_total', 'rate', 'None', 6]
+```
+
+返回行数: 1
+
+### [8] 2026-10-29T20:31:53+0800  context: FULLTEXT 检索 kind=test
+
+```sql
+SELECT doc_key, kind, path, line_start, line_end, symbol, content, MATCH(content, path, symbol) AGAINST(%s) AS score FROM sdd_docs WHERE MATCH(content, path, symbol) AGAINST(%s) AND kind = %s ORDER BY score DESC LIMIT %s  -- params: ('为 apply_discount 增加 min_total 金额门槛筛选：订单总额低于 min_total 时不应用折扣、直接返回原价，不低于时才按 rate 打折；min_total 必须为正数，缺省 None 时保持 v1 的整单折扣行为。 apply_discount min_total rate None', '为 apply_discount 增加 min_total 金额门槛筛选：订单总额低于 min_total 时不应用折扣、直接返回原价，不低于时才按 rate 打折；min_total 必须为正数，缺省 None 时保持 v1 的整单折扣行为。 apply_discount min_total rate None', 'test', 6)
+```
+
+返回行数: 6
+
+### [9] 2026-10-29T20:31:53+0800  context: LIKE 兜底检索 kind=test
+
+```sql
+SELECT doc_key, kind, path, line_start, line_end, symbol, content, 0 AS score FROM sdd_docs WHERE kind = %s AND ((content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s) OR (content LIKE %s OR path LIKE %s OR symbol LIKE %s)) LIMIT %s  -- params: ['test', '%apply_discount%', '%apply_discount%', '%apply_discount%', '%min_total%', '%min_total%', '%min_total%', '%rate%', '%rate%', '%rate%', '%None%', '%None%', '%None%', '%apply%', '%apply%', '%apply%', '%discount%', '%discount%', '%discount%', '%min%', '%min%', '%min%', '%total%', '%total%', '%total%', 6]
+```
+
+返回行数: 6
+
+### [10] 2026-10-29T20:31:53+0800  context: 符号精确命中 kind=test
+
+```sql
+SELECT doc_key, kind, path, line_start, line_end, symbol, content, 1.0 AS score FROM sdd_docs WHERE kind = %s AND symbol IN (%s,%s,%s,%s) LIMIT %s  -- params: ['test', 'apply_discount', 'min_total', 'rate', 'None', 6]
+```
+
+返回行数: 0
+
+### [11] 2026-10-29T20:31:53+0800  context: 按路径钉住 kind=test
+
+```sql
+SELECT doc_key, kind, path, line_start, line_end, symbol, content, 1.0 AS score FROM sdd_docs WHERE kind = %s AND path IN (%s) ORDER BY path, line_start LIMIT %s  -- params: ['test', 'tests/test_discount_regression.py', 60]
+```
+
+返回行数: 7
+
+### [12] 2026-10-29T20:31:53+0800  context: 统计切片总数
+
+```sql
+SELECT COUNT(*) FROM sdd_docs
+```
+
+返回行数: 1
+
+### [13] 2026-10-29T20:31:53+0800  context: 统计各 kind 切片数
+
+```sql
+SELECT kind, COUNT(*) FROM sdd_docs GROUP BY kind
+```
+
+返回行数: 3

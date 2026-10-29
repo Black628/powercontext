@@ -1,7 +1,7 @@
 # MiniMax 调用记录摘要
 
-- 日志文件：`records/minimax.jsonl`（共 11 条）
-- 真实调用成功：0 条；真实调用失败：9 条；离线回放：2 条
+- 日志文件：`records/minimax.jsonl`（共 12 条）
+- 真实调用成功：1 条；真实调用失败：9 条；离线回放：2 条
 
 ## 真实调用（mode=live）
 ### 2026-10-29T20:17:16+0800  MiniMax-M3  status=error
@@ -72,6 +72,13 @@
 - messages: system(128字,sha=99661c9e12d3ba48), user(7316字,sha=b6dba4b9de7940a4)
 - prompt 全文: `D:\Deep seek文件\deepseek\powercontext\minimax\records\prompts\20261029-201829-prompt.md`
 - 错误：`HTTP 404 <- https://api.minimaxi.com/v1/chat/completions: {"type":"error","error":{"type":"not_found_error","message":"The model \"MiniMax-M2.7\" is no longer available. (2069)","http_code":"404"},"request_id":"07326c94ca55ce5eaf8a32ea4d0f421a"}`
+
+### 2026-10-29T20:31:53+0800  MiniMax-M3  status=ok  http=200
+- endpoint: `https://api.minimaxi.com/v1/chat/completions`
+- 耗时: 6104 ms；usage: prompt=2609 completion=753 total=3362
+- messages: system(128字,sha=99661c9e12d3ba48), user(6872字,sha=73c6192277e286a4)
+- prompt 全文: `D:\Deep seek文件\deepseek\powercontext\minimax\records\prompts\20261029-203153-prompt.md`
+- 响应文件: `D:\Deep seek文件\deepseek\powercontext\minimax\records\responses\20261029-203153-response.md`；原始 JSON: `D:\Deep seek文件\deepseek\powercontext\minimax\records\responses\20261029-203153-raw.json`；patch 抽取成功=True
 
 ## 离线回放（mode=replay，不是模型响应）
 - 2026-10-29T20:17:33+0800  原因：实时调用失败（所有模型调用都失败，最后一次错误：HTTP 404 <- https://api.minimaxi.com/v1/chat/completions: {"type":"error","error":{"type":"not_found_error","message":"The model \"MiniMax-M2.7\" is no longer available. (2069)","http_code":"404"},"request_id":"07326c5c3a04a19ba2209af8f1aaaf76"}），回退 sample/offline_patch.diff

@@ -98,5 +98,55 @@
         "ok": true
       }
     }
+  },
+  {
+    "ts": "2026-10-29T20:32:15+0800",
+    "phase": "after",
+    "summary_file": "D:\\Deep seek文件\\deepseek\\powercontext\\minimax\\records\\test-logs\\after-20261029-203215.md",
+    "suites": {
+      "target": {
+        "exit_code": 0,
+        "ran": 6,
+        "result": "OK",
+        "ok": true
+      },
+      "regression": {
+        "exit_code": 0,
+        "ran": 7,
+        "result": "OK",
+        "ok": true
+      },
+      "full": {
+        "exit_code": 0,
+        "ran": 13,
+        "result": "OK",
+        "ok": true
+      }
+    }
+  },
+  {
+    "ts": "2026-10-29T20:32:47+0800",
+    "phase": "before",
+    "summary_file": "D:\\Deep seek文件\\deepseek\\powercontext\\minimax\\records\\test-logs\\before-20261029-203247.md",
+    "suites": {
+      "target": {
+        "exit_code": 1,
+        "ran": 6,
+        "result": "FAILED (errors=6)",
+        "ok": false
+      },
+      "regression": {
+        "exit_code": 0,
+        "ran": 7,
+        "result": "OK",
+        "ok": true
+      },
+      "full": {
+        "exit_code": 1,
+        "ran": 13,
+        "result": "FAILED (errors=6)",
+        "ok": false
+      }
+    }
   }
 ]

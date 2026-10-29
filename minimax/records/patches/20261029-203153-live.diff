@@ -1,0 +1,23 @@
+--- a/inventory/discount.py
++++ b/inventory/discount.py
+@@ -18,11 +18,17 @@ def order_total(items):
+     return _money(sum(line_total(item) for item in items))
+ 
+ 
+-def apply_discount(items, rate=0.9):
++def apply_discount(items, rate=0.9, min_total=None):
+     """对订单应用整单折扣，返回折扣后金额（两位小数）。
+ 
+     rate: (0, 1] 区间的折扣系数，1 表示不打折。
++    min_total: 折扣金额门槛；None 表示不设门槛。
+     """
+     if not 0 < rate <= 1:
+         raise ValueError("rate must be in (0, 1]")
+-    return _money(order_total(items) * rate)
++    if min_total is not None and not min_total > 0:
++        raise ValueError("min_total must be positive")
++
++    total = order_total(items)
++    if min_total is not None and total < min_total:
++        return total
++    return _money(total * rate)

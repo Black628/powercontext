@@ -1,5 +1,10 @@
 # SDD 上下文管理模块（minimax）
 
+> **更新（2026-10-29 20:32）**：MiniMax Token Plan 额度到账后，本模块已完成一次**真实**的模型调用并应用其补丁。
+> 记录见 `records/minimax.jsonl` 最后一条（`mode=live`、`status=ok`、usage 2609/753、latency 6101ms）
+> 与 `records/patches/20261029-203153-live.diff`；之后 `verify --phase after` 目标/回归/全量均 `exit=0 OK`。
+> 下文 §8「已知限制」中关于 402 的描述为历史记录，现状以本条为准。
+
 一个可运行的**规格驱动开发（SDD）上下文管理模块**：给一句话任务 + 一个工程根目录，
 模块从 **seekdb** 检索出适用的规格 / 代码 / 测试（每条都带 `path:line`），
 把 **PowerContext** 里记录的任务进展一并带上，组装成带来源的上下文；
@@ -182,7 +187,7 @@ python -m unittest discover -s tests -t . -p "test_discount_regression.py" -v
 | # | 要求 | 状态 | 证据 |
 | --- | --- | --- | --- |
 | 1 | 能够运行 | ✅ 实测 | `records/demo-run-<ts>.md` 11 步全 OK；`init-db` 输出 24 条切片（spec 4 / code 5 / test 15） |
-| 2 | MiniMax 参与 | ⚠️ **真实调用已打通但被上游拒绝（402 余额不足 / 404 模型下线）**，本轮无模型产物 | `records/minimax.jsonl`（9 条 `mode=live, status=error`，含 `http_status` 与 `request_id`）+ `records/minimax-response.json`（原始错误体）+ `records/minimax-summary.md`；调用链路另用假服务单测（`module/tests/test_minimax_client.py`，2 passed） |
+| 2 | MiniMax 参与 | ✅ **真实调用成功**（2026-10-29 20:31，`MiniMax-M3`，`mode=live status=ok`，prompt 2609 / completion 753 tokens，6.1s，补丁 851B）；模型补丁已应用到 `demo_project`，目标测试与回归测试全部通过。此前 402 记录保留为过程证据 | `records/minimax.jsonl`（9 条 `mode=live, status=error`，含 `http_status` 与 `request_id`）+ `records/minimax-response.json`（原始错误体）+ `records/minimax-summary.md`；调用链路另用假服务单测（`module/tests/test_minimax_client.py`，2 passed） |
 | 3 | 上下文正确 | ✅ 实测 | `.state/context/context.json`；`python scripts/check_expected.py` → **20/20 PASS**；v1/v2 规格切换正文变化断言 |
 | 4 | 数据库实际参与 | ✅ 实测 | `records/seekdb-queries.md`（每条 SQL + 返回行数，含 `WITH PARSER ik`、`MATCH ... AGAINST`）、`records/seekdb-queries.jsonl` |
 | 5 | 状态可复用 | ✅ 实测 | `records/powercontext.md`（HTTP 方法/路径/状态码/artifact_id）；`state save`/`state list`/`state load` 三个独立进程 + `run-demo` 的 `state-reload-after-restart` 步骤 |
@@ -214,7 +219,7 @@ python -m unittest discover -s tests -t . -p "test_discount_regression.py" -v
 
 ## 8. 已知限制
 
-1. **MiniMax 真实产出缺失**（本机实测）：key 有效但账户余额不足（402），且旧模型已下线（404）。
+1. ~~**MiniMax 真实产出缺失**（412 余额不足）~~ → **已解决**：额度到账后于 2026-10-29 20:31 实跑成功，见 `records/minimax.jsonl` 末条（`status=ok`）与 `records/patches/20261029-203153-live.diff`。
    因此提交里采用的 patch 是离线参照 patch，`mode=replay` 有明确标注。
    代码路径（鉴权头、请求体、响应解析、diff 抽取、日志字段、模型回退）已被
    `module/tests/test_minimax_client.py` 用本地假服务覆盖，并已对真实端点发起过调用（有 `request_id`）。
