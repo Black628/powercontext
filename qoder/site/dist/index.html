@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#070b14">
+  <meta name="description" content="Recall（知返）：把课程笔记与论文 PDF 变成能按语义找到出处、并记得你哪儿没学会的复习教练。seekdb 向量 + 全文混合检索，PowerContext 记忆薄弱点。">
+  <title>Recall（知返）· 混合检索 + 记忆复用的复习教练</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23070b14'/%3E%3Cpath d='M18 38c0-9 6-16 15-16 7 0 12 4 12 10 0 5-4 9-9 9h-6' stroke='%237ee787' stroke-width='4' fill='none' stroke-linecap='round'/%3E%3Ccircle cx='20' cy='44' r='3' fill='%231f6feb'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+
+  <header class="site-header">
+    <div class="container header-inner">
+      <a class="brand" href="#top" aria-label="Recall 知返 首页">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <path d="M4 12a8 8 0 1 0 2.34-5.66"></path>
+            <path d="M4 4v4h4"></path>
+            <circle cx="12" cy="12" r="2.5"></circle>
+          </svg>
+        </span>
+        <span class="brand-text">Recall <span>知返</span></span>
+      </a>
+
+      <nav class="nav" id="site-nav" aria-label="主导航">
+        <a href="#pain">痛点</a>
+        <a href="#solution">方案</a>
+        <a href="#tech">技术分工</a>
+        <a href="#architecture">架构</a>
+        <a href="#features">功能</a>
+        <a href="#verification">验证</a>
+        <a href="#run">运行</a>
+      </nav>
+
+      <div class="header-actions">
+        <a class="btn btn-ghost btn-sm" href="https://github.com/Black628/powercontext/tree/2026-competition-ecosystem/qoder" target="_blank" rel="noopener">GitHub</a>
+        <button class="nav-toggle" type="button" aria-label="打开导航菜单" aria-expanded="false" aria-controls="site-nav">
+          <span></span><span></span><span></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- Hero -->
+    <section class="hero" id="top">
+      <div class="hero-glow hero-glow-blue" aria-hidden="true"></div>
+      <div class="hero-glow hero-glow-green" aria-hidden="true"></div>
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="eyebrow-dot" aria-hidden="true"></span>2026 Competition Ecosystem · Qoder 赛道</p>
+          <h1>把课程笔记与论文 PDF，变成<span class="grad">记得你哪儿没学会</span>的复习教练。</h1>
+          <p class="lead">Recall（知返）用 seekdb 做向量 + 全文混合检索，毫秒级定位片段并给出处；再用 PowerContext 记录薄弱点、复习进度与历史提问。</p>
+          <div class="hero-cta">
+            <a class="btn btn-primary" href="#verification">查看真实验证结果</a>
+            <a class="btn btn-outline" href="https://github.com/Black628/powercontext/tree/2026-competition-ecosystem/qoder" target="_blank" rel="noopener">阅读源码</a>
+          </div>
+          <ul class="hero-stats" aria-label="关键实测数据">
+            <li><strong>3 篇 / 9 块</strong><span>样例文档与切块</span></li>
+            <li><strong>574.5 ms</strong><span>导入总耗时</span></li>
+            <li><strong>68.1 ms</strong><span>检索 3 次中位数</span></li>
+            <li><strong>4 / 4</strong><span>样例 PASS（全部通过）</span></li>
+          </ul>
+        </div>
+
+        <div class="hero-visual">
+          <div class="terminal" role="img" aria-label="样例 1 实测日志摘要：向量路 2.8 毫秒，全文路 87.7 毫秒，命中 2 个片段">
+            <div class="terminal-bar" aria-hidden="true">
+              <span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span>
+              <span class="terminal-title">smoke_test · 样例 1 / 4</span>
+            </div>
+            <pre class="terminal-body"><code><span class="t-dim">$ python scripts/smoke_test.py</span>
+<span class="t-blue">[向量路]</span> COSINE_DISTANCE … ORDER BY dist APPROXIMATE
+<span class="t-blue">[向量路]</span> 耗时 <span class="t-green">2.8 ms</span>
+<span class="t-green">[全文路]</span> MATCH(content) AGAINST(… IN NATURAL LANGUAGE MODE)
+<span class="t-green">[全文路]</span> 耗时 <span class="t-green">87.7 ms</span>
+<span class="t-dim">[RRF]</span> 融合 → 2 个片段 · 出处 offset 0 / 529
+<span class="t-pass">PASS</span> 倒排表 · 词项 · 文档频率</code></pre>
+          </div>
+          <p class="hero-note">日志与耗时来自 <code>scripts/smoke_test.py</code> 的真实执行记录。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 痛点 -->
+    <section class="section" id="pain">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">痛点</p>
+          <h2>复习时最耗时的，不是学，是找。</h2>
+          <p class="section-lead">课程笔记、论文 PDF、往期课件散落在不同地方。想不起关键词时，检索工具帮不上忙；找到了页面，也说不清哪一段支撑了哪个结论。</p>
+        </div>
+        <div class="grid grid-3">
+          <article class="card pain-card">
+            <span class="icon-box" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                <circle cx="11" cy="11" r="7"></circle>
+                <path d="m20 20-3.5-3.5"></path>
+              </svg>
+            </span>
+            <h3>资料散落，想不起关键词</h3>
+            <p>只记得“大概在哪一页”，却想不出原文用的词；纯关键词搜索一旦差一个字，就整页翻找。</p>
+            <span class="card-tag">检索靠运气</span>
+          </article>
+          <article class="card pain-card">
+            <span class="icon-box" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                <path d="M10 13a5 5 0 0 0 7.07 0l2.12-2.12a5 5 0 0 0-7.07-7.07L11 4"></path>
+                <path d="M14 11a5 5 0 0 0-7.07 0L4.8 13.12a5 5 0 0 0 7.07 7.07L13 19"></path>
+              </svg>
+            </span>
+            <h3>结论与原文脱节</h3>
+            <p>读论文记不住哪段支撑了哪个结论，写综述时引用无法回溯到具体文档、页码与偏移。</p>
+            <span class="card-tag">出处不可追溯</span>
+          </article>
+          <article class="card pain-card">
+            <span class="icon-box" aria-hidden="true">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                <path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+                <path d="M21 3v6h-6"></path>
+              </svg>
+            </span>
+            <h3>错题反复错</h3>
+            <p>没人记录“哪儿没懂”，每次复习都从零开始；薄弱知识点没有排序，时间总花在已经会的内容上。</p>
+            <span class="card-tag">记忆不复用</span>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 解决方案 -->
+    <section class="section section-alt" id="solution">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">解决方案</p>
+          <h2>双索引召回 + 出处引用 + 记忆复用</h2>
+          <p class="section-lead">内容交给 seekdb，人物画像交给 PowerContext：一条链路完成导入、检索、问答与复习清单。</p>
+        </div>
+        <ol class="flow">
+          <li class="flow-step">
+            <span class="flow-no">01</span>
+            <h3>导入与切块</h3>
+            <p>支持 <code>.md</code> / <code>.txt</code> / <code>.pdf</code> 文字层，按约 500 字切块，保留 <code>doc_id</code>、<code>page</code> 与 <code>offset</code>。</p>
+          </li>
+          <li class="flow-step">
+            <span class="flow-no">02</span>
+            <h3>建立双索引</h3>
+            <p>每块写入 seekdb：384 维向量列 + <code>FULLTEXT ... WITH PARSER ik</code> 中文全文索引。</p>
+          </li>
+          <li class="flow-step">
+            <span class="flow-no">03</span>
+            <h3>两路检索 + RRF</h3>
+            <p>向量近邻与 <code>MATCH ... AGAINST</code> 各自执行、各自计时，再用 RRF（k=60）融合排序。</p>
+          </li>
+          <li class="flow-step">
+            <span class="flow-no">04</span>
+            <h3>带出处回答与记忆</h3>
+            <p>top-k 片段进入问答，回答带 <code>[n]</code> 引用；薄弱点与问答历史写入 PowerContext。</p>
+          </li>
+        </ol>
+        <div class="callout callout-info">
+          <strong>不伪装成功：</strong>
+          <p>PowerContext 1.4.1 已接入真实记忆链路；服务不可达或超时时，问答与检索照常返回，记忆读写自动降级并打印告警，样例 3 则按实际写入/读取结果判定。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 技术分工 -->
+    <section class="section" id="tech">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">技术分工</p>
+          <h2>seekdb 管内容，PowerContext 管人。</h2>
+          <p class="section-lead">两个组件各自承担责任，也各自留下可核对的证据：SQL 原文、耗时、写入/读取日志。</p>
+        </div>
+
+        <div class="tech-grid">
+          <article class="tech-card tech-seekdb">
+            <div class="tech-head">
+              <div class="tech-title">
+                <span class="tech-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                    <ellipse cx="12" cy="5" rx="8" ry="3"></ellipse>
+                    <path d="M4 5v7c0 1.66 3.58 3 8 3s8-1.34 8-3V5"></path>
+                    <path d="M4 12v7c0 1.66 3.58 3 8 3s8-1.34 8-3v-7"></path>
+                  </svg>
+                </span>
+                <div>
+                  <h3>seekdb</h3>
+                  <p>内容检索 · 向量 + 全文</p>
+                </div>
+              </div>
+              <span class="pill pill-green">已实测</span>
+            </div>
+
+            <ul class="evidence">
+              <li><strong>3 篇文档 / 9 块</strong>，导入总耗时 <strong>574.5 ms</strong>。</li>
+              <li>样例 1：命中 2 个片段（offset 0 / 529），向量路 <strong>2.8 ms</strong> / 全文路 <strong>87.7 ms</strong>。</li>
+              <li>样例 2：纯关键词 top-5 漏召回；目标块向量路 <strong>rank=6</strong> 被召回，RRF 融合后 <strong>rank=6</strong>；关键词 1.8 ms / 向量 1.3 ms / 全文 1.6 ms。</li>
+              <li>两路 SQL 原文与各自耗时都打印到 INFO 日志，评审可直接复核。</li>
+            </ul>
+
+            <div class="code-block">
+              <div class="code-label">建表与索引 · scripts/init_seekdb.sql</div>
+              <pre><code>embedding    VECTOR(384)
+FULLTEXT INDEX ft_content(content) WITH PARSER ik
+VECTOR INDEX vidx(embedding)
+  WITH (distance=cosine, type=hnsw, lib=vsag)</code></pre>
+            </div>
+
+            <p class="tech-foot">运行形态：v1.4.0.0 · WSL2 发行版 <code>seekdb</code> · 端口转发到 <code>127.0.0.1:2881</code>；embedding 为 <code>hash</code>，dim=384。</p>
+          </article>
+
+          <article class="tech-card tech-powercontext">
+            <div class="tech-head">
+              <div class="tech-title">
+                <span class="tech-icon" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+                    <path d="M12 3a4 4 0 0 0-4 4v1a4 4 0 0 0 0 8v1a4 4 0 0 0 8 0v-1a4 4 0 0 0 0-8V7a4 4 0 0 0-4-4z"></path>
+                    <path d="M12 3v18"></path>
+                  </svg>
+                </span>
+                <div>
+                  <h3>PowerContext</h3>
+                  <p>记忆复用 · 薄弱点与历史</p>
+                </div>
+              </div>
+              <span class="pill pill-green">已接入</span>
+            </div>
+
+            <ul class="evidence">
+              <li>已接入真实 <strong>PowerContext 1.4.1</strong>：<code>scope</code> + <code>remember</code> + <code>entries/list</code>，每个 uid 一个 scope，title 为 <code>recall:&lt;uid&gt;</code>，不存在才创建。</li>
+              <li>样例 3 写入：创建 scope <code>recall:smoke-9d11f5db</code>（<code>scp_4084mv5ad092qgpaytbk2ndg51</code>），写入 <code>weak_point</code> 1 条、<code>qa_history</code> 1 条。</li>
+              <li>样例 3 重读：<code>weak_points</code> 命中 1 条；<code>/api/review</code> 返回 <code>topic=聚簇索引 · count=1 · source=weak_points</code>。</li>
+              <li>同一 uid 第二次解析只读不建，服务端同名 scope 数量为 1；服务不可达或超时则降级为空读写并告警。</li>
+            </ul>
+
+            <div class="code-block">
+              <div class="code-label">接口契约 · PowerContext 1.4.1</div>
+              <pre><code>GET  /v1/scopes              列 scope（分页）
+POST /v1/scopes              建 scope（idempotency_key）
+POST /v1/memory/remember     写 weak_point / qa_history
+POST /v1/memory/entries/list 列记忆并聚合薄弱点</code></pre>
+            </div>
+
+            <p class="tech-foot">运行形态：<code>http://127.0.0.1:8001</code>（<code>POWERCONTEXT_BASE_URL</code> 默认值），请求超时 <code>POWERCONTEXT_TIMEOUT</code> 默认 3 s；样例 3 每次使用随机 uid，重复执行均为 <code>count=1</code>。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 架构图 -->
+    <section class="section section-alt" id="architecture">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">架构</p>
+          <h2>一条查询，两条检索路径，一次融合。</h2>
+          <p class="section-lead">浏览器只面对 FastAPI；FastAPI 分别执行向量路与全文路 SQL，候选结果经 RRF 融合后返回带出处的 top-k。记忆读写独立于检索链路，可降级。</p>
+        </div>
+
+        <figure class="diagram-card">
+          <div class="diagram-scroll">
+            <svg class="arch" viewBox="0 0 1000 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="arch-title arch-desc">
+              <title id="arch-title">Recall 知返技术架构</title>
+              <desc id="arch-desc">浏览器调用 FastAPI。FastAPI 分别执行 seekdb 的向量近邻 SQL 与 ik 全文匹配 SQL，候选结果经 RRF(k=60) 融合后返回带出处的片段。记忆读写通过 PowerContext 1.4.1 的 scope、remember 与 entries/list 接口完成，服务不可达时降级为空读写。</desc>
+              <defs>
+                <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#58a6ff"></path>
+                </marker>
+                <marker id="arrow-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#7ee787"></path>
+                </marker>
+                <marker id="arrow-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="#d29922"></path>
+                </marker>
+                <linearGradient id="panel-grad" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0" stop-color="#121d31"></stop>
+                  <stop offset="1" stop-color="#0b1322"></stop>
+                </linearGradient>
+              </defs>
+
+              <!-- Browser -->
+              <g>
+                <rect x="28" y="218" width="168" height="124" rx="16" fill="url(#panel-grad)" stroke="#24344f"></rect>
+                <text x="112" y="252" text-anchor="middle" class="svg-title">浏览器 / 展示站</text>
+                <text x="112" y="278" text-anchor="middle" class="svg-sub">静态页 · 无外部依赖</text>
+                <text x="112" y="300" text-anchor="middle" class="svg-sub">检索 · 问答 · 复习</text>
+                <rect x="70" y="314" width="84" height="18" rx="9" fill="rgba(31,111,235,0.14)" stroke="rgba(88,166,255,0.5)"></rect>
+                <text x="112" y="327" text-anchor="middle" class="svg-chip-blue">HTTP /api/*</text>
+              </g>
+
+              <!-- FastAPI -->
+              <g>
+                <rect x="252" y="112" width="292" height="354" rx="18" fill="url(#panel-grad)" stroke="#2b4a7d" stroke-width="1.5"></rect>
+                <text x="274" y="144" class="svg-title">FastAPI · app.main</text>
+                <text x="274" y="166" class="svg-sub">两条 SQL 独立执行，各自打印耗时</text>
+
+                <rect x="272" y="180" width="252" height="72" rx="12" fill="#0a1424" stroke="#1f6feb"></rect>
+                <text x="288" y="205" class="svg-label-blue">向量路</text>
+                <text x="508" y="205" text-anchor="end" class="svg-green">2.8 ms</text>
+                <text x="288" y="226" class="svg-mono">COSINE_DISTANCE(embedding, qvec)</text>
+                <text x="288" y="242" class="svg-dim">ORDER BY dist APPROXIMATE</text>
+
+                <rect x="272" y="264" width="252" height="72" rx="12" fill="#0a1424" stroke="#2f6b4f"></rect>
+                <text x="288" y="289" class="svg-label-green">全文路</text>
+                <text x="508" y="289" text-anchor="end" class="svg-green">87.7 ms</text>
+                <text x="288" y="310" class="svg-mono">MATCH(content) AGAINST(qtext)</text>
+                <text x="288" y="326" class="svg-dim">IN NATURAL LANGUAGE MODE</text>
+
+                <rect x="272" y="348" width="252" height="64" rx="12" fill="#0a1424" stroke="#8a670f"></rect>
+                <text x="288" y="373" class="svg-label-green">RRF 融合 · k=60</text>
+                <text x="288" y="394" class="svg-dim">候选合并 → top-k + 出处</text>
+
+                <text x="274" y="440" class="svg-dim">embedding: hash · dim=384 · 离线确定性</text>
+              </g>
+
+              <!-- seekdb -->
+              <g>
+                <rect x="612" y="72" width="352" height="282" rx="18" fill="url(#panel-grad)" stroke="#2f6b4f" stroke-width="1.5"></rect>
+                <text x="636" y="106" class="svg-title">seekdb</text>
+                <rect x="716" y="90" width="92" height="22" rx="11" fill="rgba(126,231,135,0.1)" stroke="rgba(126,231,135,0.4)"></rect>
+                <text x="762" y="105" text-anchor="middle" class="svg-chip">v1.4.0.0</text>
+                <text x="636" y="132" class="svg-sub">127.0.0.1:2881 · WSL2 端口转发</text>
+
+                <rect x="636" y="150" width="304" height="74" rx="12" fill="#0a1424" stroke="#1f6feb"></rect>
+                <text x="652" y="174" class="svg-label-blue">向量索引</text>
+                <text x="652" y="195" class="svg-mono">VECTOR INDEX vidx(embedding)</text>
+                <text x="652" y="212" class="svg-dim">distance=cosine · type=hnsw · lib=vsag</text>
+
+                <rect x="636" y="236" width="304" height="70" rx="12" fill="#0a1424" stroke="#2f6b4f"></rect>
+                <text x="652" y="260" class="svg-label-green">全文索引</text>
+                <text x="652" y="281" class="svg-mono">FULLTEXT ft_content(content)</text>
+                <text x="652" y="297" class="svg-dim">WITH PARSER ik · 中文分词</text>
+
+                <text x="636" y="334" class="svg-sub">chunks 表 · 3 篇文档 / 9 块 · 导入 574.5 ms</text>
+              </g>
+
+              <!-- PowerContext -->
+              <g>
+                <rect x="612" y="398" width="352" height="132" rx="18" fill="rgba(210,153,34,0.05)" stroke="#8a670f" stroke-dasharray="6 6"></rect>
+                <text x="636" y="430" class="svg-title-amber">PowerContext 1.4.1</text>
+                <text x="636" y="456" class="svg-mono">scope · remember · entries/list</text>
+                <text x="636" y="482" class="svg-sub">weak_point / qa_history 按 uid 隔离</text>
+                <text x="636" y="506" class="svg-green">样例 3 · PASS（写入与重读命中）</text>
+              </g>
+
+              <!-- Arrows -->
+              <path d="M196 280 H244" fill="none" stroke="#58a6ff" stroke-width="1.6" marker-end="url(#arrow-blue)"></path>
+              <text x="220" y="270" text-anchor="middle" class="svg-arrow-label">HTTP</text>
+
+              <path d="M524 216 H606" fill="none" stroke="#58a6ff" stroke-width="1.6" marker-end="url(#arrow-blue)"></path>
+              <text x="565" y="207" text-anchor="middle" class="svg-arrow-label">向量近邻</text>
+
+              <path d="M524 300 C 560 300 572 278 606 278" fill="none" stroke="#7ee787" stroke-width="1.6" marker-end="url(#arrow-green)"></path>
+              <text x="565" y="289" text-anchor="middle" class="svg-arrow-label-green">全文匹配</text>
+
+              <path d="M612 320 C 570 320 560 380 524 380" fill="none" stroke="#7ee787" stroke-width="1.6" marker-end="url(#arrow-green)"></path>
+              <text x="560" y="344" text-anchor="middle" class="svg-arrow-label-green">候选返回</text>
+
+              <path d="M544 444 C 570 444 582 462 606 462" fill="none" stroke="#d29922" stroke-width="1.6" stroke-dasharray="6 5" marker-end="url(#arrow-amber)"></path>
+              <text x="560" y="434" text-anchor="middle" class="svg-arrow-label-amber">读写记忆</text>
+            </svg>
+          </div>
+          <figcaption class="diagram-caption">
+            样例 1 实测：向量路 2.8 ms · 全文路 87.7 ms；样例 2：目标块向量 rank=6 · RRF rank=6。
+            <span class="diagram-hint">左右滑动查看完整架构图</span>
+          </figcaption>
+          <div class="legend">
+            <span><i class="legend-line legend-solid"></i> 已实测检索链路</span>
+            <span><i class="legend-line legend-dashed"></i> 记忆链路（PowerContext 1.4.1，可降级）</span>
+          </div>
+        </figure>
+      </div>
+    </section>
+
+    <!-- 核心功能 -->
+    <section class="section" id="features">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">核心功能</p>
+          <h2>6 个接口，覆盖导入、检索、问答与复习。</h2>
+          <p class="section-lead">接口定义见 <code>app/main.py</code>。未配置 LLM 网关时，<code>/api/ask</code> 退化为抽取式回答，仍然带 <code>[n]</code> 引用与出处。</p>
+        </div>
+
+        <div class="grid grid-3 api-grid">
+          <article class="card api-card">
+            <div class="api-head"><span class="method method-post">POST</span><code class="api-path">/api/docs</code></div>
+            <p>上传 <code>.md</code> / <code>.txt</code> / <code>.pdf</code>，返回 <code>doc_id</code>，后台完成切块与双索引构建。</p>
+          </article>
+          <article class="card api-card">
+            <div class="api-head"><span class="method method-get">GET</span><code class="api-path">/api/docs</code></div>
+            <p>查看文档列表与索引状态，确认导入是否完成。</p>
+          </article>
+          <article class="card api-card">
+            <div class="api-head"><span class="method method-post">POST</span><code class="api-path">/api/search</code></div>
+            <p>输入 <code>{query, k}</code>，返回 top-k 片段、出处与两路各自得分，以及 RRF 融合分数。</p>
+          </article>
+          <article class="card api-card">
+            <div class="api-head"><span class="method method-post">POST</span><code class="api-path">/api/ask</code></div>
+            <p>输入 <code>{query, uid?, topic?, understood?}</code>，返回带 <code>[n]</code> 引用的回答与命中片段。</p>
+          </article>
+          <article class="card api-card">
+            <div class="api-head"><span class="method method-get">GET</span><code class="api-path">/api/review?uid=</code></div>
+            <p>今日复习清单，薄弱点次数来自 PowerContext 记忆；服务不可达时降级为空清单。</p>
+          </article>
+          <article class="card api-card">
+            <div class="api-head"><span class="method method-get">GET</span><code class="api-path">/api/stats</code></div>
+            <p>导入量、检索次数与估算节省时间；为「使用效果」提供原始计数。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 验证 -->
+    <section class="section section-alt" id="verification">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">验证样例</p>
+          <h2>4 个样例：4/4 PASS，全部附实测证据。</h2>
+          <p class="section-lead">所有样例由 <code>scripts/smoke_test.py</code> 自动执行，逐项打印 PASS/FAIL 与实际证据；任一 FAIL 时脚本以非 0 退出。</p>
+        </div>
+
+        <ul class="env-chips" aria-label="复现环境">
+          <li><span>引擎</span>seekdb v1.4.0.0</li>
+          <li><span>部署</span>WSL2 · 127.0.0.1:2881</li>
+          <li><span>向量</span>hash · dim=384</li>
+          <li><span>数据</span>3 篇 / 9 块 · 574.5 ms</li>
+          <li><span>记忆</span>PowerContext 1.4.1</li>
+        </ul>
+
+        <div class="table-wrap">
+          <table class="verify-table">
+            <thead>
+              <tr>
+                <th scope="col">样例</th>
+                <th scope="col">输入</th>
+                <th scope="col">结果</th>
+                <th scope="col">实测证据（来自 smoke_test.py）</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row" data-label="样例"><div class="cell">样例 1 · 检索 + 出处</div></th>
+                <td data-label="输入"><div class="cell"><code>倒排索引为什么比顺序扫描快</code><span class="cell-note">k=5</span></div></td>
+                <td data-label="结果"><div class="cell"><span class="status status-pass">PASS</span></div></td>
+                <td data-label="实测证据"><div class="cell">命中 <code>全文索引与倒排表.md</code> 2 个片段（offset 0 / 529），<code>倒排表</code>、<code>词项</code>、<code>文档频率</code> 全部出现；向量路 <strong>2.8 ms</strong> / 全文路 <strong>87.7 ms</strong>。</div></td>
+              </tr>
+              <tr>
+                <th scope="row" data-label="样例"><div class="cell">样例 2 · 混合检索必要性</div></th>
+                <td data-label="输入"><div class="cell"><code>B+ 树和 LSM 树在写放大上的区别</code><span class="cell-note">k=5</span></div></td>
+                <td data-label="结果"><div class="cell"><span class="status status-pass">PASS</span></div></td>
+                <td data-label="实测证据"><div class="cell">纯关键词 top-5 <strong>未命中</strong>目标块；目标块在向量路 <strong>rank=6</strong> 召回，RRF 融合后 <strong>rank=6</strong>；关键词 1.8 ms / 向量 1.3 ms / 全文 1.6 ms。</div></td>
+              </tr>
+              <tr>
+                <th scope="row" data-label="样例"><div class="cell">样例 3 · 记忆复用</div></th>
+                <td data-label="输入"><div class="cell"><code>聚簇索引是什么</code><span class="cell-note">标记没懂 → 重开 /api/review</span></div></td>
+                <td data-label="结果"><div class="cell"><span class="status status-pass">PASS</span></div></td>
+                <td data-label="实测证据"><div class="cell">PowerContext 1.4.1 创建 scope <code>recall:smoke-9d11f5db</code>（<code>scp_4084mv5ad092qgpaytbk2ndg51</code>），写入 <code>weak_point</code> 1 条、<code>qa_history</code> 1 条；重读命中 1 条；<code>/api/review</code> 返回 <code>topic=聚簇索引 · count=1 · source=weak_points</code>。日志见 <code>docs/verification.md</code> §5.3。</div></td>
+              </tr>
+              <tr>
+                <th scope="row" data-label="样例"><div class="cell">样例 4 · 提效对比</div></th>
+                <td data-label="输入"><div class="cell">同一问题，预热 1 次后测 3 次<span class="cell-note">取中位数</span></div></td>
+                <td data-label="结果"><div class="cell"><span class="status status-pass">PASS</span></div></td>
+                <td data-label="实测证据"><div class="cell">本项目 3 次 <strong>53.4 / 68.1 / 70.1 ms</strong>，中位数 <strong>68.1 ms</strong>；手动基线<strong>未实测</strong>（<code>MANUAL_LOOKUP_SECONDS=0</code>），<span class="pending-text">不计算提效倍数</span>。</div></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="verify-summary">
+          <span class="summary-label">汇总</span>
+          <span class="pill pill-green">4 / 4 PASS</span>
+          <span class="summary-text">退出码 0（全部样例通过）</span>
+          <a class="summary-link" href="https://github.com/Black628/powercontext/blob/2026-competition-ecosystem/qoder/docs/verification.md" target="_blank" rel="noopener">完整记录 · docs/verification.md</a>
+        </div>
+
+        <div class="callout callout-warn">
+          <strong>口径说明</strong>
+          <p>样例 4 的手动基线与本项目耗时均要求「3 次取中位数」。目前手动基线未实测（<code>MANUAL_LOOKUP_SECONDS=0</code>），因此本页<strong>不展示任何提效倍数</strong>；补测真实中位数后再填写。</p>
+        </div>
+
+        <div class="usage-card">
+          <div>
+            <p class="kicker">使用效果</p>
+            <h3>待补充</h3>
+            <p>真实访问统计与同学使用反馈尚未收集，不预填使用人数或使用次数。完成试用后，以截图与原始记录为准更新。</p>
+          </div>
+          <span class="status status-pending">待收集</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 如何运行 -->
+    <section class="section" id="run">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">如何运行</p>
+          <h2>三条命令，从导入到自检。</h2>
+          <p class="section-lead">前置：seekdb 已启动并可在 <code>127.0.0.1:2881</code> 连接；PowerContext 1.4.1 默认连 <code>127.0.0.1:8001</code>，不可用时自动降级。所有命令在 <code>qoder/</code> 目录执行，配置参考 <code>app/.env.example</code>。</p>
+        </div>
+
+        <div class="run-list">
+          <div class="run-step">
+            <span class="run-no">01</span>
+            <div class="run-copy">
+              <h3>导入样例文档</h3>
+              <p>首次运行会自动建库建表；可重复执行，脚本会先清理旧块。</p>
+            </div>
+            <div class="cmd">
+              <code>python scripts/seed_docs.py</code>
+              <button class="copy-btn" type="button" data-copy="python scripts/seed_docs.py" aria-label="复制导入命令">复制</button>
+            </div>
+          </div>
+          <div class="run-step">
+            <span class="run-no">02</span>
+            <div class="run-copy">
+              <h3>启动 API 服务</h3>
+              <p>FastAPI 提供检索、问答、复习与统计接口。</p>
+            </div>
+            <div class="cmd">
+              <code>uvicorn app.main:app --host 0.0.0.0 --port 8000</code>
+              <button class="copy-btn" type="button" data-copy="uvicorn app.main:app --host 0.0.0.0 --port 8000" aria-label="复制启动命令">复制</button>
+            </div>
+          </div>
+          <div class="run-step">
+            <span class="run-no">03</span>
+            <div class="run-copy">
+              <h3>一键自检</h3>
+              <p>打印 4 个样例的 PASS/FAIL、两路 SQL 与耗时；任一 FAIL 时退出码非 0。</p>
+            </div>
+            <div class="cmd">
+              <code>python scripts/smoke_test.py</code>
+              <button class="copy-btn" type="button" data-copy="python scripts/smoke_test.py" aria-label="复制自检命令">复制</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 代码仓库 -->
+    <section class="section repo-section" id="repo">
+      <div class="container">
+        <div class="repo-card">
+          <p class="kicker">代码仓库</p>
+          <h2>完整源码、样例与验证记录</h2>
+          <p>分支 <code>2026-competition-ecosystem</code> 下的 <code>qoder/</code> 目录。</p>
+          <a class="repo-link" href="https://github.com/Black628/powercontext/tree/2026-competition-ecosystem/qoder" target="_blank" rel="noopener">https://github.com/Black628/powercontext/tree/2026-competition-ecosystem/qoder</a>
+          <a class="btn btn-primary" href="https://github.com/Black628/powercontext/tree/2026-competition-ecosystem/qoder" target="_blank" rel="noopener">打开仓库</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false">
+            <path d="M4 12a8 8 0 1 0 2.34-5.66"></path>
+            <path d="M4 4v4h4"></path>
+            <circle cx="12" cy="12" r="2.5"></circle>
+          </svg>
+        </span>
+        <div>
+          <strong>Recall（知返）</strong>
+          <p>把笔记与论文变成可追溯的复习教练。</p>
+        </div>
+      </div>
+      <div class="footer-meta">
+        <p>数据来源：<a href="https://github.com/Black628/powercontext/blob/2026-competition-ecosystem/qoder/docs/verification.md" target="_blank" rel="noopener">docs/verification.md §5.1–5.2</a></p>
+        <p>纯静态页面 · 无外部 CDN / 字体 / 图片</p>
+        <p><strong>本项目由 Qoder 开发 · Qoder 账号：BLACK-King</strong></p>
+      </div>
+    </div>
+    <div class="container footer-bottom">
+      <span>© 2026 Recall · 2026 Competition Ecosystem</span>
+      <a href="#top">回到顶部 ↑</a>
+    </div>
+  </footer>
+</body>
+</html>

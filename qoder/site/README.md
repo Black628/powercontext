@@ -23,9 +23,10 @@ python -m http.server 8080 -d site
 
 ## 数据口径（重要）
 
-- 所有实测数字来自 `../docs/verification.md` 的 **5.1 / 5.2** 节，不得手改。
-- 样例 3 为 **FAIL**：PowerContext 未配置，记忆功能降级为空操作；页面如实展示，不改成 PASS。
-- 样例 4 的手动基线尚未实测，`1800 s` 只是占位值；因此页面**不出现任何提效倍数**，只写“待实测填写”。
+- 所有实测数字来自 `../docs/verification.md` 的 **5.1 / 5.2 / 5.3** 节，不得手改。
+- 样例 3 为 **PASS**：`app/memory.py` 已接入 PowerContext 1.4.1（`scope` + `remember` + `entries/list`），页面展示真实写入、重读命中与 `/api/review` 证据。
+- 4 个样例整体为 **4/4 PASS**，退出码 0。
+- 样例 4 的手动基线尚未实测（`MANUAL_LOOKUP_SECONDS=0`）；因此页面**不出现任何提效倍数**，只写“不计算提效倍数”。
 - “使用效果”一栏保持“待补充”，不预填使用人数 / 次数。补测与收集后再更新页面。
 
 ## 编码

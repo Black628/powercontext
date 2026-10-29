@@ -63,22 +63,22 @@
           <ul class="hero-stats" aria-label="关键实测数据">
             <li><strong>3 篇 / 9 块</strong><span>样例文档与切块</span></li>
             <li><strong>574.5 ms</strong><span>导入总耗时</span></li>
-            <li><strong>49.6 ms</strong><span>检索 3 次中位数</span></li>
-            <li><strong>3 / 4</strong><span>样例 PASS（样例 3 未通过）</span></li>
+            <li><strong>68.1 ms</strong><span>检索 3 次中位数</span></li>
+            <li><strong>4 / 4</strong><span>样例 PASS（全部通过）</span></li>
           </ul>
         </div>
 
         <div class="hero-visual">
-          <div class="terminal" role="img" aria-label="样例 1 实测日志摘要：向量路 4.1 毫秒，全文路 3.7 毫秒，命中 2 个片段">
+          <div class="terminal" role="img" aria-label="样例 1 实测日志摘要：向量路 2.8 毫秒，全文路 87.7 毫秒，命中 2 个片段">
             <div class="terminal-bar" aria-hidden="true">
               <span class="dot dot-red"></span><span class="dot dot-yellow"></span><span class="dot dot-green"></span>
               <span class="terminal-title">smoke_test · 样例 1 / 4</span>
             </div>
             <pre class="terminal-body"><code><span class="t-dim">$ python scripts/smoke_test.py</span>
 <span class="t-blue">[向量路]</span> COSINE_DISTANCE … ORDER BY dist APPROXIMATE
-<span class="t-blue">[向量路]</span> 耗时 <span class="t-green">4.1 ms</span>
+<span class="t-blue">[向量路]</span> 耗时 <span class="t-green">2.8 ms</span>
 <span class="t-green">[全文路]</span> MATCH(content) AGAINST(… IN NATURAL LANGUAGE MODE)
-<span class="t-green">[全文路]</span> 耗时 <span class="t-green">3.7 ms</span>
+<span class="t-green">[全文路]</span> 耗时 <span class="t-green">87.7 ms</span>
 <span class="t-dim">[RRF]</span> 融合 → 2 个片段 · 出处 offset 0 / 529
 <span class="t-pass">PASS</span> 倒排表 · 词项 · 文档频率</code></pre>
           </div>
@@ -165,7 +165,7 @@
         </ol>
         <div class="callout callout-info">
           <strong>不伪装成功：</strong>
-          <p>PowerContext 未配置时，问答与检索照常返回，记忆读写降级为空操作。样例 3 因此如实标记为 FAIL，而不是改写成 PASS。</p>
+          <p>PowerContext 1.4.1 已接入真实记忆链路；服务不可达或超时时，问答与检索照常返回，记忆读写自动降级并打印告警，样例 3 则按实际写入/读取结果判定。</p>
         </div>
       </div>
     </section>
@@ -200,8 +200,8 @@
 
             <ul class="evidence">
               <li><strong>3 篇文档 / 9 块</strong>，导入总耗时 <strong>574.5 ms</strong>。</li>
-              <li>样例 1：命中 2 个片段（offset 0 / 529），向量路 <strong>4.1 ms</strong> / 全文路 <strong>3.7 ms</strong>。</li>
-              <li>样例 2：纯关键词 top-5 漏召回；目标块向量路 <strong>rank=6</strong> 被召回，RRF 融合后 <strong>rank=6</strong>；关键词 1.9 ms / 向量 1.4 ms / 全文 1.5 ms。</li>
+              <li>样例 1：命中 2 个片段（offset 0 / 529），向量路 <strong>2.8 ms</strong> / 全文路 <strong>87.7 ms</strong>。</li>
+              <li>样例 2：纯关键词 top-5 漏召回；目标块向量路 <strong>rank=6</strong> 被召回，RRF 融合后 <strong>rank=6</strong>；关键词 1.8 ms / 向量 1.3 ms / 全文 1.6 ms。</li>
               <li>两路 SQL 原文与各自耗时都打印到 INFO 日志，评审可直接复核。</li>
             </ul>
 
@@ -230,28 +230,25 @@ VECTOR INDEX vidx(embedding)
                   <p>记忆复用 · 薄弱点与历史</p>
                 </div>
               </div>
-              <span class="pill pill-amber">待配置</span>
+              <span class="pill pill-green">已接入</span>
             </div>
 
-            <ul class="evidence evidence-amber">
-              <li>记忆键：<code>user:{uid}:weak_points</code>、<code>progress</code>、<code>qa_history</code>，按用户隔离。</li>
-              <li><strong>当前环境未配置</strong> <code>POWERCONTEXT_BASE_URL</code>，记忆功能降级为空操作。</li>
-              <li>样例 3 为 <strong>FAIL</strong>：<code>/api/review</code> 返回空清单；该结果原样保留。</li>
-              <li>阶段 1 客户端与 PowerContext 1.4.x 的路径、请求体均不兼容，迁移待补。</li>
+            <ul class="evidence">
+              <li>已接入真实 <strong>PowerContext 1.4.1</strong>：<code>scope</code> + <code>remember</code> + <code>entries/list</code>，每个 uid 一个 scope，title 为 <code>recall:&lt;uid&gt;</code>，不存在才创建。</li>
+              <li>样例 3 写入：创建 scope <code>recall:smoke-9d11f5db</code>（<code>scp_4084mv5ad092qgpaytbk2ndg51</code>），写入 <code>weak_point</code> 1 条、<code>qa_history</code> 1 条。</li>
+              <li>样例 3 重读：<code>weak_points</code> 命中 1 条；<code>/api/review</code> 返回 <code>topic=聚簇索引 · count=1 · source=weak_points</code>。</li>
+              <li>同一 uid 第二次解析只读不建，服务端同名 scope 数量为 1；服务不可达或超时则降级为空读写并告警。</li>
             </ul>
 
             <div class="code-block">
-              <div class="code-label">接口差异 · 待迁移</div>
-              <pre><code>阶段 1 客户端
-  GET / POST /v1/memories
-PowerContext 1.4.x
-  /v1/memory/remember
-  /v1/memory/search
-  /v1/memory/flush
-  /v1/memory/entries/*</code></pre>
+              <div class="code-label">接口契约 · PowerContext 1.4.1</div>
+              <pre><code>GET  /v1/scopes              列 scope（分页）
+POST /v1/scopes              建 scope（idempotency_key）
+POST /v1/memory/remember     写 weak_point / qa_history
+POST /v1/memory/entries/list 列记忆并聚合薄弱点</code></pre>
             </div>
 
-            <p class="tech-foot">配置兼容协议的记忆服务、或完成端点迁移后，补写真实的写入/读取日志与 <code>/api/review</code> 证据，再更新样例 3。</p>
+            <p class="tech-foot">运行形态：<code>http://127.0.0.1:8001</code>（<code>POWERCONTEXT_BASE_URL</code> 默认值），请求超时 <code>POWERCONTEXT_TIMEOUT</code> 默认 3 s；样例 3 每次使用随机 uid，重复执行均为 <code>count=1</code>。</p>
           </article>
         </div>
       </div>
@@ -270,7 +267,7 @@ PowerContext 1.4.x
           <div class="diagram-scroll">
             <svg class="arch" viewBox="0 0 1000 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="arch-title arch-desc">
               <title id="arch-title">Recall 知返技术架构</title>
-              <desc id="arch-desc">浏览器调用 FastAPI。FastAPI 分别执行 seekdb 的向量近邻 SQL 与 ik 全文匹配 SQL，候选结果经 RRF(k=60) 融合后返回带出处的片段。记忆读写通过 PowerContext，当前未配置时降级为空操作。</desc>
+              <desc id="arch-desc">浏览器调用 FastAPI。FastAPI 分别执行 seekdb 的向量近邻 SQL 与 ik 全文匹配 SQL，候选结果经 RRF(k=60) 融合后返回带出处的片段。记忆读写通过 PowerContext 1.4.1 的 scope、remember 与 entries/list 接口完成，服务不可达时降级为空读写。</desc>
               <defs>
                 <marker id="arrow-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                   <path d="M0,0 L10,5 L0,10 z" fill="#58a6ff"></path>
@@ -305,13 +302,13 @@ PowerContext 1.4.x
 
                 <rect x="272" y="180" width="252" height="72" rx="12" fill="#0a1424" stroke="#1f6feb"></rect>
                 <text x="288" y="205" class="svg-label-blue">向量路</text>
-                <text x="508" y="205" text-anchor="end" class="svg-green">4.1 ms</text>
+                <text x="508" y="205" text-anchor="end" class="svg-green">2.8 ms</text>
                 <text x="288" y="226" class="svg-mono">COSINE_DISTANCE(embedding, qvec)</text>
                 <text x="288" y="242" class="svg-dim">ORDER BY dist APPROXIMATE</text>
 
                 <rect x="272" y="264" width="252" height="72" rx="12" fill="#0a1424" stroke="#2f6b4f"></rect>
                 <text x="288" y="289" class="svg-label-green">全文路</text>
-                <text x="508" y="289" text-anchor="end" class="svg-green">3.7 ms</text>
+                <text x="508" y="289" text-anchor="end" class="svg-green">87.7 ms</text>
                 <text x="288" y="310" class="svg-mono">MATCH(content) AGAINST(qtext)</text>
                 <text x="288" y="326" class="svg-dim">IN NATURAL LANGUAGE MODE</text>
 
@@ -346,10 +343,10 @@ PowerContext 1.4.x
               <!-- PowerContext -->
               <g>
                 <rect x="612" y="398" width="352" height="132" rx="18" fill="rgba(210,153,34,0.05)" stroke="#8a670f" stroke-dasharray="6 6"></rect>
-                <text x="636" y="430" class="svg-title-amber">PowerContext（可选）</text>
-                <text x="636" y="456" class="svg-mono">weak_points · qa_history · progress</text>
-                <text x="636" y="482" class="svg-sub">当前未配置 → 记忆降级为空操作</text>
-                <text x="636" y="506" class="svg-fail">样例 3 · FAIL（如实保留）</text>
+                <text x="636" y="430" class="svg-title-amber">PowerContext 1.4.1</text>
+                <text x="636" y="456" class="svg-mono">scope · remember · entries/list</text>
+                <text x="636" y="482" class="svg-sub">weak_point / qa_history 按 uid 隔离</text>
+                <text x="636" y="506" class="svg-green">样例 3 · PASS（写入与重读命中）</text>
               </g>
 
               <!-- Arrows -->
@@ -370,12 +367,12 @@ PowerContext 1.4.x
             </svg>
           </div>
           <figcaption class="diagram-caption">
-            样例 1 实测：向量路 4.1 ms · 全文路 3.7 ms；样例 2：目标块向量 rank=6 · RRF rank=6。
+            样例 1 实测：向量路 2.8 ms · 全文路 87.7 ms；样例 2：目标块向量 rank=6 · RRF rank=6。
             <span class="diagram-hint">左右滑动查看完整架构图</span>
           </figcaption>
           <div class="legend">
-            <span><i class="legend-line legend-solid"></i> 已实测链路</span>
-            <span><i class="legend-line legend-dashed"></i> PowerContext 未配置（降级为空操作）</span>
+            <span><i class="legend-line legend-solid"></i> 已实测检索链路</span>
+            <span><i class="legend-line legend-dashed"></i> 记忆链路（PowerContext 1.4.1，可降级）</span>
           </div>
         </figure>
       </div>
@@ -409,7 +406,7 @@ PowerContext 1.4.x
           </article>
           <article class="card api-card">
             <div class="api-head"><span class="method method-get">GET</span><code class="api-path">/api/review?uid=</code></div>
-            <p>今日复习清单，薄弱点次数来自 PowerContext 记忆；未配置时返回空清单。</p>
+            <p>今日复习清单，薄弱点次数来自 PowerContext 记忆；服务不可达时降级为空清单。</p>
           </article>
           <article class="card api-card">
             <div class="api-head"><span class="method method-get">GET</span><code class="api-path">/api/stats</code></div>
@@ -424,7 +421,7 @@ PowerContext 1.4.x
       <div class="container">
         <div class="section-head">
           <p class="kicker">验证样例</p>
-          <h2>4 个样例：3 PASS、1 FAIL，全部如实展示。</h2>
+          <h2>4 个样例：4/4 PASS，全部附实测证据。</h2>
           <p class="section-lead">所有样例由 <code>scripts/smoke_test.py</code> 自动执行，逐项打印 PASS/FAIL 与实际证据；任一 FAIL 时脚本以非 0 退出。</p>
         </div>
 
@@ -433,7 +430,7 @@ PowerContext 1.4.x
           <li><span>部署</span>WSL2 · 127.0.0.1:2881</li>
           <li><span>向量</span>hash · dim=384</li>
           <li><span>数据</span>3 篇 / 9 块 · 574.5 ms</li>
-          <li><span>记忆</span>PowerContext 未配置</li>
+          <li><span>记忆</span>PowerContext 1.4.1</li>
         </ul>
 
         <div class="table-wrap">
@@ -451,25 +448,25 @@ PowerContext 1.4.x
                 <th scope="row" data-label="样例"><div class="cell">样例 1 · 检索 + 出处</div></th>
                 <td data-label="输入"><div class="cell"><code>倒排索引为什么比顺序扫描快</code><span class="cell-note">k=5</span></div></td>
                 <td data-label="结果"><div class="cell"><span class="status status-pass">PASS</span></div></td>
-                <td data-label="实测证据"><div class="cell">命中 <code>全文索引与倒排表.md</code> 2 个片段（offset 0 / 529），<code>倒排表</code>、<code>词项</code>、<code>文档频率</code> 全部出现；向量路 <strong>4.1 ms</strong> / 全文路 <strong>3.7 ms</strong>。</div></td>
+                <td data-label="实测证据"><div class="cell">命中 <code>全文索引与倒排表.md</code> 2 个片段（offset 0 / 529），<code>倒排表</code>、<code>词项</code>、<code>文档频率</code> 全部出现；向量路 <strong>2.8 ms</strong> / 全文路 <strong>87.7 ms</strong>。</div></td>
               </tr>
               <tr>
                 <th scope="row" data-label="样例"><div class="cell">样例 2 · 混合检索必要性</div></th>
                 <td data-label="输入"><div class="cell"><code>B+ 树和 LSM 树在写放大上的区别</code><span class="cell-note">k=5</span></div></td>
                 <td data-label="结果"><div class="cell"><span class="status status-pass">PASS</span></div></td>
-                <td data-label="实测证据"><div class="cell">纯关键词 top-5 <strong>未命中</strong>目标块；目标块在向量路 <strong>rank=6</strong> 召回，RRF 融合后 <strong>rank=6</strong>；关键词 1.9 ms / 向量 1.4 ms / 全文 1.5 ms。</div></td>
+                <td data-label="实测证据"><div class="cell">纯关键词 top-5 <strong>未命中</strong>目标块；目标块在向量路 <strong>rank=6</strong> 召回，RRF 融合后 <strong>rank=6</strong>；关键词 1.8 ms / 向量 1.3 ms / 全文 1.6 ms。</div></td>
               </tr>
-              <tr class="row-fail">
+              <tr>
                 <th scope="row" data-label="样例"><div class="cell">样例 3 · 记忆复用</div></th>
                 <td data-label="输入"><div class="cell"><code>聚簇索引是什么</code><span class="cell-note">标记没懂 → 重开 /api/review</span></div></td>
-                <td data-label="结果"><div class="cell"><span class="status status-fail">FAIL</span></div></td>
-                <td data-label="实测证据"><div class="cell">PowerContext 未配置，日志为 <code>[memory] 未配置 POWERCONTEXT_BASE_URL，记忆功能降级为空操作</code>；<code>/api/review</code> 返回空清单。与 1.4.x 的接口兼容性见 <code>docs/verification.md</code> §5.3。</div></td>
+                <td data-label="结果"><div class="cell"><span class="status status-pass">PASS</span></div></td>
+                <td data-label="实测证据"><div class="cell">PowerContext 1.4.1 创建 scope <code>recall:smoke-9d11f5db</code>（<code>scp_4084mv5ad092qgpaytbk2ndg51</code>），写入 <code>weak_point</code> 1 条、<code>qa_history</code> 1 条；重读命中 1 条；<code>/api/review</code> 返回 <code>topic=聚簇索引 · count=1 · source=weak_points</code>。日志见 <code>docs/verification.md</code> §5.3。</div></td>
               </tr>
               <tr>
                 <th scope="row" data-label="样例"><div class="cell">样例 4 · 提效对比</div></th>
                 <td data-label="输入"><div class="cell">同一问题，预热 1 次后测 3 次<span class="cell-note">取中位数</span></div></td>
-                <td data-label="结果"><div class="cell"><span class="status status-pending">PASS · 口径待补</span></div></td>
-                <td data-label="实测证据"><div class="cell">本项目 3 次 <strong>56.2 / 47.2 / 49.6 ms</strong>，中位数 <strong>49.6 ms</strong>；手动基线<strong>尚未实测</strong>，1800 s 仅为占位值 → <span class="pending-text">提效倍数待实测填写</span>。</div></td>
+                <td data-label="结果"><div class="cell"><span class="status status-pass">PASS</span></div></td>
+                <td data-label="实测证据"><div class="cell">本项目 3 次 <strong>53.4 / 68.1 / 70.1 ms</strong>，中位数 <strong>68.1 ms</strong>；手动基线<strong>未实测</strong>（<code>MANUAL_LOOKUP_SECONDS=0</code>），<span class="pending-text">不计算提效倍数</span>。</div></td>
               </tr>
             </tbody>
           </table>
@@ -477,14 +474,14 @@ PowerContext 1.4.x
 
         <div class="verify-summary">
           <span class="summary-label">汇总</span>
-          <span class="pill pill-green">3 / 4 PASS</span>
-          <span class="summary-text">退出码 1（样例 3 未通过）</span>
+          <span class="pill pill-green">4 / 4 PASS</span>
+          <span class="summary-text">退出码 0（全部样例通过）</span>
           <a class="summary-link" href="https://github.com/Black628/powercontext/blob/2026-competition-ecosystem/qoder/docs/verification.md" target="_blank" rel="noopener">完整记录 · docs/verification.md</a>
         </div>
 
         <div class="callout callout-warn">
           <strong>口径说明</strong>
-          <p>样例 4 的手动基线与本项目耗时均要求「3 次取中位数」。目前手动基线未实测，1800 s 只是赛题假设的占位值，因此本页<strong>不展示任何提效倍数</strong>；补测真实中位数后再填写。</p>
+          <p>样例 4 的手动基线与本项目耗时均要求「3 次取中位数」。目前手动基线未实测（<code>MANUAL_LOOKUP_SECONDS=0</code>），因此本页<strong>不展示任何提效倍数</strong>；补测真实中位数后再填写。</p>
         </div>
 
         <div class="usage-card">
@@ -504,7 +501,7 @@ PowerContext 1.4.x
         <div class="section-head">
           <p class="kicker">如何运行</p>
           <h2>三条命令，从导入到自检。</h2>
-          <p class="section-lead">前置：seekdb 已启动并可在 <code>127.0.0.1:2881</code> 连接；PowerContext 可选。所有命令在 <code>qoder/</code> 目录执行，配置参考 <code>app/.env.example</code>。</p>
+          <p class="section-lead">前置：seekdb 已启动并可在 <code>127.0.0.1:2881</code> 连接；PowerContext 1.4.1 默认连 <code>127.0.0.1:8001</code>，不可用时自动降级。所有命令在 <code>qoder/</code> 目录执行，配置参考 <code>app/.env.example</code>。</p>
         </div>
 
         <div class="run-list">

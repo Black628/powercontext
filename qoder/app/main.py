@@ -39,8 +39,8 @@ LLM_TIMEOUT = float(os.getenv("LLM_TIMEOUT", "30"))
 
 # 切块参数：约 500 字/块（REQUIREMENTS 2.1）
 CHUNK_SIZE = int(os.getenv("CHUNK_SIZE", "500"))
-# 提效估算：手动翻找中位数 30 分钟 → 本项目 10 秒（样例 4 口径）
-MANUAL_SECONDS = int(os.getenv("MANUAL_LOOKUP_SECONDS", "1800"))
+# 提效估算：手动翻找中位数默认 0 = 未实测；显式配置 > 0 才估算
+MANUAL_SECONDS = int(os.getenv("MANUAL_LOOKUP_SECONDS", "0"))
 RECALL_SECONDS = int(os.getenv("RECALL_LOOKUP_SECONDS", "10"))
 
 _CN_SENT_SPLIT = re.compile(r"(?<=[。！？；\n])")
@@ -293,12 +293,22 @@ def review_list(uid: str = "guest"):
 def do_stats():
     s = store.stats()
     lookups = s["search_count"] + s["ask_count"]
-    saved_minutes = round(lookups * (MANUAL_SECONDS - RECALL_SECONDS) / 60.0, 1)
+    baseline_measured = MANUAL_SECONDS > 0
+    saved_minutes = (
+        round(lookups * (MANUAL_SECONDS - RECALL_SECONDS) / 60.0, 1)
+        if baseline_measured
+        else None
+    )
     return {
         "doc_count": s["doc_count"],
         "chunk_count": s["chunk_count"],
         "search_count": s["search_count"],
         "ask_count": s["ask_count"],
         "estimated_saved_minutes": saved_minutes,
-        "assumption": f"每次查资料 {MANUAL_SECONDS}s → {RECALL_SECONDS}s",
+        "baseline_measured": baseline_measured,
+        "assumption": (
+            f"每次查资料 {MANUAL_SECONDS}s → {RECALL_SECONDS}s"
+            if baseline_measured
+            else "手动基线未实测（MANUAL_LOOKUP_SECONDS=0），不估算节省时间"
+        ),
     }

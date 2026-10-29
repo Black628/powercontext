@@ -10,7 +10,7 @@
 
 用法：
     python scripts/smoke_test.py
-    python scripts/smoke_test.py --k 5 --manual-seconds 1800
+    python scripts/smoke_test.py --k 5 --manual-seconds 95   # 已实测手动中位数时
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import re
 import statistics
 import sys
@@ -47,6 +48,9 @@ REQUIRED_DOCS = [
 TARGET_DOC = "全文索引与倒排表.md"
 KEYWORDS_SAMPLE1 = ["倒排表", "词项", "文档频率"]
 WIDTH = 84
+
+# 手动翻 PDF 找答案的中位数（秒）。0 表示尚未实测，不计算提效倍数。
+MANUAL_LOOKUP_SECONDS = float(os.getenv("MANUAL_LOOKUP_SECONDS") or 0)
 
 _COST_RE = re.compile(r"耗时:\s*([0-9.]+)\s*ms")
 _HITS_RE = re.compile(r"命中:\s*(\d+)\s*条")
@@ -432,7 +436,10 @@ def sample4(manual_seconds: float, k: int) -> tuple[bool, str]:
     print("\n" + "=" * WIDTH)
     print("样例 4/4 · 提效对比")
     print(f"输入：{query}")
-    print(f"手动基线：{manual_seconds:.0f} s（docs/verification.md 记录的 3 次中位数）")
+    if manual_seconds > 0:
+        print(f"手动基线：{manual_seconds:.1f} s（实测 3 次中位数）")
+    else:
+        print("手动基线：未实测（MANUAL_LOOKUP_SECONDS=0）")
     _bar()
 
     try:
@@ -447,15 +454,27 @@ def sample4(manual_seconds: float, k: int) -> tuple[bool, str]:
         return False, f"检索异常：{e}"
 
     median_ms = statistics.median(times)
-    manual_ms = manual_seconds * 1000.0
-    speedup = manual_ms / median_ms if median_ms > 0 else 0.0
-    saved_s = (manual_ms - median_ms) / 1000.0
+    runs_ok = len(times) == 3 and all(t > 0 for t in times)
     print(f"\n本项目 3 次中位数：{median_ms:.1f} ms")
-    print(f"手动翻 PDF 中位数：{manual_ms:.0f} ms（{manual_seconds:.0f} s）")
-    print(f"提效倍数：{speedup:.1f}x | 单次节省约 {saved_s:.1f} s")
 
-    ok = median_ms > 0 and speedup > 1.0
-    reason = f"本项目中位数 {median_ms:.1f}ms vs 手动 {manual_ms:.0f}ms，提效 {speedup:.1f}x"
+    if manual_seconds > 0:
+        manual_ms = manual_seconds * 1000.0
+        speedup = manual_ms / median_ms if median_ms > 0 else 0.0
+        saved_s = (manual_ms - median_ms) / 1000.0
+        print(f"手动翻 PDF 中位数：{manual_ms:.0f} ms（{manual_seconds:.1f} s）")
+        print(f"提效倍数：{speedup:.1f}x | 单次节省约 {saved_s:.1f} s")
+        ok = runs_ok and speedup > 1.0
+        reason = (
+            f"本项目中位数 {median_ms:.1f}ms vs 手动 {manual_ms:.0f}ms，"
+            f"提效 {speedup:.1f}x"
+        )
+    else:
+        print("手动基线未实测，不计算提效倍数")
+        ok = runs_ok and median_ms > 0
+        reason = (
+            f"本项目 3 次均成功，中位数 {median_ms:.1f}ms；"
+            "手动基线未实测，不计算提效倍数"
+        )
     return ok, reason
 
 
@@ -470,8 +489,8 @@ def main() -> int:
     parser.add_argument(
         "--manual-seconds",
         type=float,
-        default=float(app_main.MANUAL_SECONDS),
-        help=f"手动翻 PDF 中位数秒数（默认 {app_main.MANUAL_SECONDS}）",
+        default=MANUAL_LOOKUP_SECONDS,
+        help=f"实测手动翻 PDF 中位数秒数；0 表示未实测、不计算倍数（默认 {MANUAL_LOOKUP_SECONDS:g}）",
     )
     parser.add_argument(
         "--uid",
