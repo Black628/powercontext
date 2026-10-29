@@ -13,10 +13,12 @@ import hashlib
 import logging
 import os
 import re
+from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from . import embed, memory, search, store
@@ -130,6 +132,13 @@ class AskReq(BaseModel):
 
 
 app = FastAPI(title="Recall（知返）", version="0.1.0")
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+@app.get("/", include_in_schema=False)
+def index() -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html", media_type="text/html; charset=utf-8")
 
 
 @app.on_event("startup")

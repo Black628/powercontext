@@ -33,6 +33,7 @@
         <a href="#tech">技术分工</a>
         <a href="#architecture">架构</a>
         <a href="#features">功能</a>
+        <a href="#demo">界面演示</a>
         <a href="#verification">验证</a>
         <a href="#run">运行</a>
       </nav>
@@ -412,6 +413,49 @@ POST /v1/memory/entries/list 列记忆并聚合薄弱点</code></pre>
             <div class="api-head"><span class="method method-get">GET</span><code class="api-path">/api/stats</code></div>
             <p>导入量、检索次数与估算节省时间；为「使用效果」提供原始计数。</p>
           </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 本地运行界面 -->
+    <section class="section" id="demo">
+      <div class="container">
+        <div class="section-head">
+          <p class="kicker">界面演示</p>
+          <h2>最小 Web 界面：检索、问答、今日复习。</h2>
+          <p class="section-lead">FastAPI 在 <code>GET /</code> 返回单文件页面，直接调用既有的 <code>/api/search</code>、<code>/api/ask</code> 与 <code>/api/review</code>。以下三张均为本地真实运行截图：服务运行在 <code>127.0.0.1:8002</code>，页面在无头 Edge 中真实请求 seekdb 与 PowerContext，不是设计稿或空状态占位。</p>
+        </div>
+
+        <div class="shots">
+          <figure class="shot">
+            <img src="screenshots/01-home.png" width="1280" height="900" loading="lazy"
+                 alt="Recall 知返本地首页：顶部混合检索、问答输入框与今日复习三个区块，复习清单列出倒排索引 ×2、LSM 树 ×1、递归树法 ×1">
+            <figcaption>
+              <strong>首页初始状态</strong>
+              <span>三个区块同屏：顶部混合检索、问答输入、今日复习；复习清单来自 <code>uid=demo</code> 的真实记忆。</span>
+              <span class="shot-tag">本地真实运行截图</span>
+            </figcaption>
+          </figure>
+
+          <figure class="shot">
+            <img src="screenshots/02-search.png" width="1280" height="1300" loading="lazy"
+                 alt="检索“关键词倒排索引为什么比顺序扫描快”的结果页：5 条片段卡片，每张显示文档名、页码与偏移、片段前 120 字、vector_rank、fulltext_rank 与 rrf_score">
+            <figcaption>
+              <strong>真实检索结果</strong>
+              <span>查询“关键词倒排索引为什么比顺序扫描快”，返回 5 条片段；每张卡片显示文档名、页码/偏移、片段前 120 字、<code>vector_rank</code>、<code>fulltext_rank</code> 与 <code>rrf_score</code>。</span>
+              <span class="shot-tag">本地真实运行截图</span>
+            </figcaption>
+          </figure>
+
+          <figure class="shot">
+            <img src="screenshots/03-review.png" width="1100" height="900" loading="lazy"
+                 alt="今日复习区块：uid=demo，日期 2026-10-29，列出倒排索引 ×2、LSM 树 ×1、递归树法 ×1">
+            <figcaption>
+              <strong>今日复习区块</strong>
+              <span>按 PowerContext 记忆聚合：倒排索引 ×2、LSM 树 ×1、递归树法 ×1，均来自真实问答写入的 <code>weak_point</code>。</span>
+              <span class="shot-tag">本地真实运行截图</span>
+            </figcaption>
+          </figure>
         </div>
       </div>
     </section>

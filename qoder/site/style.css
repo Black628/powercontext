@@ -458,6 +458,45 @@ body.nav-open .nav-toggle span:nth-child(3) { transform: translateY(-6px) rotate
 .card h3 { margin: 0 0 10px; font-size: 18px; line-height: 1.4; }
 .card p { margin: 0; color: var(--muted); font-size: 14.5px; line-height: 1.75; }
 
+/* ---------- 本地运行截图 ---------- */
+.shots { display: grid; gap: 22px; }
+.shot {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.028), rgba(255, 255, 255, 0.008));
+}
+.shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  background: #f5f6f8;
+  border-bottom: 1px solid var(--line);
+}
+.shot figcaption {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 14px 18px;
+  color: var(--muted);
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+.shot figcaption strong { color: var(--text); font-weight: 650; }
+.shot figcaption code { white-space: normal; }
+.shot .shot-tag {
+  margin-left: auto;
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+@media (max-width: 700px) {
+  .shot .shot-tag { margin-left: 0; }
+}
+
 .pain-card { padding-top: 28px; }
 .icon-box {
   display: inline-flex;

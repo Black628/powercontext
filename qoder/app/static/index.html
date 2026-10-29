@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Recall（知返）· 本地运行界面</title>
+<style>
+  :root {
+    --bg: #f5f6f8;
+    --card: #ffffff;
+    --line: #e2e5ea;
+    --text: #1f2937;
+    --muted: #6b7280;
+    --accent: #2563eb;
+    --accent-soft: #eff4ff;
+    --bad: #b91c1c;
+    --mono: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  }
+  .page-head {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    flex-wrap: wrap;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 26px 20px 10px;
+  }
+  .brand { font-size: 21px; font-weight: 700; letter-spacing: .2px; }
+  .brand span { color: var(--accent); }
+  .page-head .sub { color: var(--muted); font-size: 13px; }
+  main {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 8px 20px 36px;
+    display: grid;
+    gap: 16px;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 18px 20px 20px;
+  }
+  .sec-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 12px;
+  }
+  .sec-head h1, .sec-head h2 {
+    font-size: 16px;
+    margin: 0;
+    font-weight: 650;
+  }
+  .hint { color: var(--muted); font-size: 12.5px; }
+  .row { display: flex; gap: 8px; }
+  .row input {
+    flex: 1;
+    min-width: 0;
+    padding: 9px 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font: inherit;
+    color: var(--text);
+    background: #fbfbfc;
+    outline: none;
+  }
+  .row input:focus { border-color: var(--accent); background: #fff; box-shadow: 0 0 0 3px var(--accent-soft); }
+  .row button {
+    padding: 9px 18px;
+    border: 1px solid var(--accent);
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+  }
+  .row button:hover { background: #1d4ed8; }
+  .row button:disabled { opacity: .55; cursor: default; }
+  .meta { margin-top: 10px; color: var(--muted); font-size: 13px; min-height: 20px; }
+  .meta.bad { color: var(--bad); }
+  .results { display: grid; gap: 10px; }
+  .hit {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px;
+    background: #fcfcfd;
+  }
+  .hit-top { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+  .hit-top .doc { font-weight: 600; font-size: 14px; }
+  .hit-top .loc { color: var(--muted); font-size: 12.5px; font-family: var(--mono); }
+  .snippet { margin: 7px 0 9px; font-size: 13.5px; color: #374151; }
+  .scores { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px; color: var(--muted); font-family: var(--mono); }
+  .scores b { color: var(--text); font-weight: 600; }
+  .answer {
+    margin-top: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fcfcfd;
+    white-space: pre-wrap;
+    font-size: 14px;
+  }
+  .citations { margin: 10px 0 0; padding-left: 0; list-style: none; display: grid; gap: 6px; }
+  .citations li { font-size: 12.5px; color: var(--muted); }
+  .citations li b { color: var(--accent); font-family: var(--mono); }
+  .review { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 8px; }
+  .review li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 14px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fcfcfd;
+  }
+  .review .topic { font-weight: 550; }
+  .review .count {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 999px;
+    padding: 2px 10px;
+    white-space: nowrap;
+  }
+  .review .src { color: var(--muted); font-size: 12px; margin-left: 8px; }
+  .empty { color: var(--muted); font-size: 13.5px; padding: 8px 2px; }
+  footer {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 20px 30px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+<header class="page-head">
+  <div class="brand">Recall <span>知返</span></div>
+  <div class="sub">本地运行界面 · seekdb 双索引 + PowerContext 记忆</div>
+</header>
+
+<main>
+  <section class="card" id="search-section" aria-labelledby="search-title">
+    <div class="sec-head">
+      <h1 id="search-title">混合检索</h1>
+      <span class="hint">向量近邻 + ik 全文两路召回，RRF 融合</span>
+    </div>
+    <form class="row" id="search-form">
+      <input id="q" type="text" autocomplete="off"
+             placeholder="输入要查找的内容，例如：关键词倒排索引为什么比顺序扫描快">
+      <button type="submit" id="search-btn">检索</button>
+    </form>
+    <div class="meta" id="search-meta" role="status"></div>
+    <div class="results" id="search-results"></div>
+  </section>
+
+  <section class="card" id="ask-section" aria-labelledby="ask-title">
+    <div class="sec-head">
+      <h2 id="ask-title">问答（带引用）</h2>
+      <span class="hint">回答中的 [n] 对应下方出处</span>
+    </div>
+    <form class="row" id="ask-form">
+      <input id="ask-q" type="text" autocomplete="off"
+             placeholder="基于资料库提问，例如：倒排索引为什么检索快？">
+      <button type="submit" id="ask-btn">提问</button>
+    </form>
+    <div class="meta" id="ask-meta" role="status"></div>
+    <div class="answer" id="answer" hidden></div>
+    <ol class="citations" id="citations"></ol>
+  </section>
+
+  <section class="card" id="review-section" aria-labelledby="review-title">
+    <div class="sec-head">
+      <h2 id="review-title">今日复习</h2>
+      <span class="hint" id="review-hint">uid=demo · 来自 PowerContext 记忆</span>
+    </div>
+    <div class="meta" id="review-meta" role="status"></div>
+    <ul class="review" id="review-list"></ul>
+  </section>
+</main>
+
+<footer>本地实测界面：检索与问答走 seekdb 混合检索，复习清单来自 PowerContext 记忆。</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  var searchForm = document.getElementById("search-form");
+  var searchBtn = document.getElementById("search-btn");
+  var qInput = document.getElementById("q");
+  var searchMeta = document.getElementById("search-meta");
+  var searchResults = document.getElementById("search-results");
+
+  var askForm = document.getElementById("ask-form");
+  var askBtn = document.getElementById("ask-btn");
+  var askInput = document.getElementById("ask-q");
+  var askMeta = document.getElementById("ask-meta");
+  var answerBox = document.getElementById("answer");
+  var citations = document.getElementById("citations");
+
+  var reviewMeta = document.getElementById("review-meta");
+  var reviewList = document.getElementById("review-list");
+
+  function esc(value) {
+    return String(value == null ? "" : value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function setMeta(node, text, bad) {
+    node.textContent = text || "";
+    node.classList.toggle("bad", !!bad);
+  }
+
+  function rankText(rank) {
+    return rank == null ? "—" : "#" + rank;
+  }
+
+  function renderResults(data) {
+    var results = data.results || [];
+    setMeta(
+      searchMeta,
+      "共 " + results.length + " 条结果 · 向量路 " + (data.vector_hits || 0) +
+      " 条 · 全文路 " + (data.fulltext_hits || 0) + " 条（按 RRF 融合分降序）"
+    );
+    searchResults.innerHTML = "";
+    if (!results.length) {
+      searchResults.innerHTML = '<div class="empty">没有命中片段，请换一个关键词。</div>';
+      return;
+    }
+    results.forEach(function (item) {
+      var snippet = String(item.snippet || "");
+      var shown = snippet.slice(0, 120) + (snippet.length > 120 ? "…" : "");
+      var rrf = typeof item.rrf_score === "number" ? item.rrf_score.toFixed(6) : "—";
+      var card = document.createElement("article");
+      card.className = "hit";
+      card.innerHTML =
+        '<div class="hit-top">' +
+          '<div class="doc">' + esc(item.doc_name) + '</div>' +
+          '<div class="loc">第 ' + esc(item.page) + ' 页 · 偏移 ' + esc(item.offset) + '</div>' +
+        '</div>' +
+        '<p class="snippet">' + esc(shown) + '</p>' +
+        '<div class="scores">' +
+          '<span>vector_rank <b>' + rankText(item.vector_rank) + '</b></span>' +
+          '<span>fulltext_rank <b>' + rankText(item.fulltext_rank) + '</b></span>' +
+          '<span>rrf_score <b>' + rrf + '</b></span>' +
+        '</div>';
+      searchResults.appendChild(card);
+    });
+  }
+
+  function runSearch() {
+    var q = qInput.value.trim();
+    if (!q) {
+      setMeta(searchMeta, "请先输入检索关键词。", true);
+      return Promise.resolve();
+    }
+    searchBtn.disabled = true;
+    setMeta(searchMeta, "检索中…");
+    searchResults.innerHTML = "";
+    return fetch("/api/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: q, k: 5 })
+    })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (!res.ok) {
+            throw new Error(data.detail || ("HTTP " + res.status));
+          }
+          renderResults(data);
+        });
+      })
+      .catch(function (err) {
+        setMeta(searchMeta, "检索失败：" + err.message, true);
+      })
+      .finally(function () {
+        searchBtn.disabled = false;
+      });
+  }
+
+  function renderCitations(data) {
+    citations.innerHTML = "";
+    (data.citations || []).forEach(function (c) {
+      var li = document.createElement("li");
+      li.innerHTML =
+        '<b>[' + esc(c.n) + ']</b> ' + esc(c.doc_name) +
+        ' · 第 ' + esc(c.page) + ' 页 · 偏移 ' + esc(c.offset);
+      citations.appendChild(li);
+    });
+  }
+
+  function runAsk() {
+    var q = askInput.value.trim();
+    if (!q) {
+      setMeta(askMeta, "请先输入问题。", true);
+      return Promise.resolve();
+    }
+    askBtn.disabled = true;
+    setMeta(askMeta, "检索并组织回答中…");
+    answerBox.hidden = true;
+    citations.innerHTML = "";
+    return fetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query: q, k: 5, uid: "demo" })
+    })
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (!res.ok) {
+            throw new Error(data.detail || ("HTTP " + res.status));
+          }
+          answerBox.textContent = data.answer || "（无回答）";
+          answerBox.hidden = false;
+          renderCitations(data);
+          setMeta(askMeta, "引用 " + (data.citations || []).length + " 条出处");
+        });
+      })
+      .catch(function (err) {
+        setMeta(askMeta, "问答失败：" + err.message, true);
+      })
+      .finally(function () {
+        askBtn.disabled = false;
+      });
+  }
+
+  function renderReview(data) {
+    var items = data.items || [];
+    reviewList.innerHTML = "";
+    document.getElementById("review-hint").textContent =
+      "uid=" + (data.uid || "demo") + " · " + (data.date || "") + " · 来自 PowerContext 记忆";
+    if (!items.length) {
+      setMeta(reviewMeta, "今日暂无待复习主题。");
+      reviewList.innerHTML = '<li class="empty">今日暂无待复习主题。</li>';
+      return;
+    }
+    setMeta(reviewMeta, "今日待复习 " + items.length + " 个主题，按标记次数排列。");
+    items.forEach(function (item) {
+      var li = document.createElement("li");
+      li.innerHTML =
+        '<span class="topic">' + esc(item.topic) +
+          '<span class="src">' + esc(item.source || "") + '</span></span>' +
+        '<span class="count">× ' + esc(item.count) + '</span>';
+      reviewList.appendChild(li);
+    });
+  }
+
+  function loadReview() {
+    setMeta(reviewMeta, "读取记忆中…");
+    return fetch("/api/review?uid=demo")
+      .then(function (res) {
+        return res.json().catch(function () { return {}; }).then(function (data) {
+          if (!res.ok) {
+            throw new Error(data.detail || ("HTTP " + res.status));
+          }
+          renderReview(data);
+        });
+      })
+      .catch(function (err) {
+        setMeta(reviewMeta, "复习清单加载失败：" + err.message, true);
+      });
+  }
+
+  searchForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    runSearch();
+  });
+  askForm.addEventListener("submit", function (e) {
+    e.preventDefault();
+    runAsk();
+  });
+
+  // 支持深链接：?q=… 自动检索，?shot=search|review 定位区块（截图与分享用）
+  var params = new URLSearchParams(window.location.search);
+  var presetQ = params.get("q");
+  var shot = params.get("shot");
+
+  loadReview().then(function () {
+    if (shot === "review") {
+      document.getElementById("review-section").scrollIntoView({ block: "start" });
+    }
+  });
+
+  if (presetQ) {
+    qInput.value = presetQ;
+    runSearch().then(function () {
+      if (shot === "search") {
+        document.getElementById("search-section").scrollIntoView({ block: "start" });
+      }
+    });
+  }
+
+  var presetAsk = params.get("ask");
+  if (presetAsk) {
+    askInput.value = presetAsk;
+    runAsk();
+  }
+})();
+</script>
+</body>
+</html>

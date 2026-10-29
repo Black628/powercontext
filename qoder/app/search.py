@@ -134,13 +134,17 @@ def hybrid_search(query: str, k: int = 5) -> dict:
     for rank, row in enumerate(vec_rows, start=1):
         it = items.setdefault(row["id"], _to_item(row))
         it["vector_rank"] = rank
-        it["vector_dist"] = float(row["dist"])
-        it["rrf_score"] += 1.0 / (RRF_K + rank)
+        # COSINE_DISTANCE 在向量列为空时可能返回 NULL；此时该条不计入 RRF，
+        # 否则 float(None) 会让整个 /api/search 直接 500。
+        it["vector_dist"] = float(row["dist"]) if row.get("dist") is not None else None
+        if it["vector_dist"] is not None:
+            it["rrf_score"] += 1.0 / (RRF_K + rank)
     for rank, row in enumerate(ft_rows, start=1):
         it = items.setdefault(row["id"], _to_item(row))
         it["fulltext_rank"] = rank
-        it["fulltext_score"] = float(row["score"])
-        it["rrf_score"] += 1.0 / (RRF_K + rank)
+        it["fulltext_score"] = float(row["score"]) if row.get("score") is not None else None
+        if it["fulltext_score"] is not None:
+            it["rrf_score"] += 1.0 / (RRF_K + rank)
 
     results = sorted(items.values(), key=lambda x: x["rrf_score"], reverse=True)[:k]
     logger.info(
