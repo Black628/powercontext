@@ -70,36 +70,43 @@ python scripts/smoke_test.py
 > 说明：样例 4 的“手动 3 次”需要人工操作，脚本只自动化“本项目 3 次”；手动基线的
 > 3 次原始记录请连同截图放入 `screenshots/`，并在网站使用效果页引用。
 
-## 5. 本次实测记录（2026-10-29）
+## 5. 本次实测记录
 
-环境：官方 `@oceanbase/seekdb-node` 启动的本地 seekdb（`127.0.0.1:57618`），
-`EMBEDDING_PROVIDER=hash`（dim=384），3 篇文档共 9 块，`chunks` 表含
-`FULLTEXT INDEX ft_content ... WITH PARSER ik` 与
-`VECTOR INDEX vidx(embedding) WITH (distance=cosine, type=hnsw, lib=vsag)`。
+### 5.1 复现环境（可重跑）
+
+| 项 | 值 |
+| --- | --- |
+| seekdb | `seekdb-v1.4.0.0`（MySQL 5.7.25 协议），跑在 WSL2 发行版 `seekdb` 中，端口转发到 Windows `127.0.0.1:2881` |
+| 建表 | `scripts/init_seekdb.sql`，`VECTOR(384)` + `FULLTEXT ... WITH PARSER ik` + `VECTOR INDEX ... WITH (distance=cosine, type=hnsw, lib=vsag)` |
+| embedding | `EMBEDDING_PROVIDER=hash`（dim=384，离线确定性） |
+| 数据 | `python scripts/seed_docs.py` → 3 篇文档 / 9 块，总耗时 574.5 ms |
+| PowerContext | **未配置**（`POWERCONTEXT_BASE_URL` 为空），记忆功能降级为空操作 |
+
+### 5.2 逐项结果
 
 | 样例 | 结果 | 实测证据 |
 | --- | --- | --- |
-| 样例 1 | PASS | `全文索引与倒排表.md` 命中 2 个片段（offset 529 / 0），`倒排表/词项/文档频率` 全部出现；向量路 21.6 ms、全文路 20.2 ms |
-| 样例 2 | PASS | 纯关键词 top-5 未命中目标块（目标块在全文候选里排第 6）；向量路 rank=6、`dist=0.9223` 已召回；RRF 融合 rank=6、`rrf=0.0303`；关键词 4.7 ms / 向量 1.6 ms / 全文 3.6 ms |
-| 样例 3 | FAIL | 日志为 `[memory] 未配置 POWERCONTEXT_BASE_URL，记忆功能降级为空操作`；`/api/review` 返回空清单。原因见下节 |
-| 样例 4 | PASS | 3 次 93.4 / 61.2 / 74.6 ms，中位数 74.6 ms；手动基线 1800 s，提效 24137.4x |
+| 样例 1 检索 + 出处 | PASS | `全文索引与倒排表.md` 命中 2 个片段（offset 0 / 529），`倒排表`、`词项`、`文档频率` 全部出现；**向量路 4.1 ms / 全文路 3.7 ms**（两路各自执行并打印 SQL 与耗时） |
+| 样例 2 混合检索必要性 | PASS | 纯关键词 top-5 **未**命中目标块；目标块在向量路 rank=6 被召回；RRF 融合后 rank=6；关键词 1.9 ms / 向量 1.4 ms / 全文 1.5 ms |
+| 样例 3 记忆复用 | **FAIL** | 日志 `[memory] 未配置 POWERCONTEXT_BASE_URL，记忆功能降级为空操作`；`/api/review` 返回空清单。原因见 5.3 |
+| 样例 4 提效对比 | PASS（口径待补） | 本项目 3 次 56.2 / 47.2 / 49.6 ms，中位数 **49.6 ms**。**手动翻 PDF 的基线尚未实测**，默认 1800 s 只是占位值 |
 
-汇总：**3/4 PASS，退出码 1**（样例 3 未通过）。在兼容的阶段 1 记忆服务就绪后，
-样例 3 的判定条件（写入日志、读取日志、`/api/review` 出现 `聚簇索引` 且 `count=1`）
-已被脚本覆盖，无需改动即可复跑。
+汇总：**3/4 PASS，退出码 1**（样例 3 未通过）。
 
-### 样例 3 的 PowerContext 兼容性说明
+> ⚠️ 样例 4 的"提效倍数"必须等手动基线实测后才有意义：用 1800 s 假设值会算出上万的倍数，那是
+> 假设值的产物，不能作为对外宣传数据。网站上的"使用效果"一栏因此保持「待补充」，
+> 待录入真实的手动中位数后再计算倍数。
+
+### 5.3 样例 3 的 PowerContext 兼容性说明
 
 阶段 1 的 `app/memory.py` 按 `GET/POST /v1/memories` 读写记忆（`user_id`/`key`/`items`）。
-实测的 PowerContext 1.4.x 暴露的是 `/v1/memory/remember`、`/v1/memory/search`、
-`/v1/memory/flush`、`/v1/memory/entries/*` 等接口，两者**路径与请求体均不兼容**，
-因此当前环境无法写出 `weak_points`。阶段 2 的约束是「不改已有文件行为，只允许小幅修 bug」，
-重写记忆客户端超出该范围，故本次保留降级行为并在此如实记录：
+PowerContext 1.4.x 暴露的是 `/v1/memory/remember`、`/v1/memory/search`、`/v1/memory/flush`、
+`/v1/memory/entries/*` 等接口，两者**路径与请求体均不兼容**，因此当前环境无法写出 `weak_points`：
 
 - 未配置 `POWERCONTEXT_BASE_URL`：问答照常返回，记忆读写为空操作，样例 3 FAIL；
 - 配置了兼容阶段 1 协议的记忆服务：样例 3 应 PASS；
-- 若要接 PowerContext 1.4.x：需要单独把 `memory.py` 的端点与请求体迁到新 API
-  （建议作为阶段 3 的独立改动，并在 `verification.md` 补新证据）。
+- 若要接 PowerContext 1.4.x：需要把 `memory.py` 的端点与请求体迁到新 API，并在这里补新证据。
+
 
 ## 6. 常见失败与排查
 
