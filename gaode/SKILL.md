@@ -56,9 +56,10 @@ description: 周边去哪儿 —— 根据用户的位置与一句话需求，�
 ### 步骤 1：周边搜索
 
 1. 初始半径 `R = clamp(max_walk_min × 80, 500, 5000)` 米（步行约 80 米/分钟）。
-2. 调 `maps_around_search(location=origin, keywords=类型词, radius=R, offset=25, page=1)`。
-3. 候选不足 `2 × top_n` 条时，按顺序尝试：翻 `page=2` → 把 `R` 放大到 `min(R × 1.5, 5000)` 重查一次。
-   **最多两轮**，避免无意义调用。
+2. 调 `maps_around_search(location=origin, keywords=类型词, radius=R)`。
+   该工具契约只有这三个参数（`location` 必填、`keywords` 类型词、`radius` 单位米且上限 50000），
+   **不要传 `page` / `offset` 等未声明的参数**——多传参数可能导致整次调用报错，直接影响推荐结果。
+3. 候选不足 `2 × top_n` 条时，把 `R` 放大到 `min(R × 1.5, 5000)` 重查一次；**最多两轮**，避免无意义调用。
 4. 记录每条 POI 的 `id`/`name`/`address`/`location`/`type`，后续所有输出只能引用这些字段。
 
 ### 步骤 2：逐个查步行路线（**不可省略、不可用直线距离代替**）
