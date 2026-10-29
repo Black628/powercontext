@@ -1,0 +1,88 @@
+{
+  "model": "Xenova/all-MiniLM-L6-v2",
+  "cacheDir": "D:\\wsl\\stepfun-wt\\stepfun\\node_modules\\@huggingface\\transformers\\.cache\\",
+  "measuredAt": "2026-10-29T12:57:01.681Z",
+  "sidecarFiles": [
+    {
+      "file": "Xenova\\all-MiniLM-L6-v2\\config.json",
+      "bytes": 650
+    },
+    {
+      "file": "Xenova\\all-MiniLM-L6-v2\\tokenizer.json",
+      "bytes": 711661
+    },
+    {
+      "file": "Xenova\\all-MiniLM-L6-v2\\tokenizer_config.json",
+      "bytes": 366
+    }
+  ],
+  "sidecarBytes": 712677,
+  "results": [
+    {
+      "dtype": "fp32",
+      "pipelineOk": true,
+      "error": null,
+      "loadMs": 18050.7,
+      "downloadedFile": "model.onnx",
+      "expectedFile": "model.onnx",
+      "mappingMatches": true,
+      "newFiles": [
+        {
+          "file": "Xenova\\all-MiniLM-L6-v2\\onnx\\model.onnx",
+          "bytes": 90387606
+        }
+      ],
+      "fallbackDownloadedBytes": null,
+      "onnxFile": "model.onnx",
+      "onnxBytes": 90387606,
+      "baselineOnnxBytes": 90387606,
+      "compressionVsFp32": 1,
+      "savingPercent": 0,
+      "modelTotalWithSidecar": 91100283
+    },
+    {
+      "dtype": "fp16",
+      "pipelineOk": true,
+      "error": null,
+      "loadMs": 10281.5,
+      "downloadedFile": "model_fp16.onnx",
+      "expectedFile": "model_fp16.onnx",
+      "mappingMatches": true,
+      "newFiles": [
+        {
+          "file": "Xenova\\all-MiniLM-L6-v2\\onnx\\model_fp16.onnx",
+          "bytes": 45297825
+        }
+      ],
+      "fallbackDownloadedBytes": null,
+      "onnxFile": "model_fp16.onnx",
+      "onnxBytes": 45297825,
+      "baselineOnnxBytes": 90387606,
+      "compressionVsFp32": 1.995,
+      "savingPercent": 49.9,
+      "modelTotalWithSidecar": 46010502
+    },
+    {
+      "dtype": "q8",
+      "pipelineOk": true,
+      "error": null,
+      "loadMs": 9870.1,
+      "downloadedFile": "model_quantized.onnx",
+      "expectedFile": "model_quantized.onnx",
+      "mappingMatches": true,
+      "newFiles": [
+        {
+          "file": "Xenova\\all-MiniLM-L6-v2\\onnx\\model_quantized.onnx",
+          "bytes": 22972370
+        }
+      ],
+      "fallbackDownloadedBytes": null,
+      "onnxFile": "model_quantized.onnx",
+      "onnxBytes": 22972370,
+      "baselineOnnxBytes": 90387606,
+      "compressionVsFp32": 3.935,
+      "savingPercent": 74.6,
+      "modelTotalWithSidecar": 23685047
+    }
+  ]
+}

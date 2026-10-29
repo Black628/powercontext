@@ -1,0 +1,813 @@
+{
+  "measuredAt": "2026-10-29T12:55:11.237Z",
+  "base": "http://127.0.0.1:7860",
+  "runtime": "Node v24.9.0 / onnxruntime-node CPU EP + HTTP + seekdb",
+  "summary": {
+    "dtype": "q8",
+    "model": "Xenova/all-MiniLM-L6-v2",
+    "modelLoadMs": 128.67,
+    "chunkSize": 420,
+    "batchSize": 8,
+    "topK": 5,
+    "chunkCount": 6,
+    "queryCount": 10,
+    "repsPerQuery": 5,
+    "sampleCount": 50,
+    "docEmbedMsTotal": 79.89,
+    "docThroughputDocsPerSec": 75.1,
+    "writeMsTotal": 130.63,
+    "refreshMsTotal": 716.13,
+    "writeMedianPerBatchMs": 130.63,
+    "refreshMedianPerBatchMs": 716.13,
+    "ingestTotalMs": 1010.82,
+    "seekdbLatencyMedianMs": 46.72,
+    "seekdbLatencyP95Ms": 48.35,
+    "queryEmbedMedianMs": 2.25,
+    "httpRoundtripMedianMs": 48.52,
+    "e2eMedianMs": 51.11,
+    "e2eP95Ms": 52.73,
+    "zeroHitSamples": 0,
+    "collectionCount": 6
+  },
+  "batchStats": [
+    {
+      "batch": 6,
+      "embedMs": 79.89,
+      "writeMs": 130.63,
+      "refreshMs": 716.13,
+      "total": 6
+    }
+  ],
+  "samples": [
+    {
+      "query": "怎么在 AMD 平台上部署 seekdb",
+      "rep": 0,
+      "qEmbedMs": 3.75,
+      "httpMs": 89.19,
+      "dbMs": 86.05,
+      "e2eMs": 92.94,
+      "resultCount": 5,
+      "top1": "amd-radeon.md#0",
+      "top1Score": 0.0328,
+      "results": [
+        {
+          "id": "amd-radeon.md#0",
+          "score": 0.0328
+        },
+        {
+          "id": "fulltext-index.md#0",
+          "score": 0.032
+        },
+        {
+          "id": "amd-radeon.md#1",
+          "score": 0.0313
+        },
+        {
+          "id": "fulltext-index.md#1",
+          "score": 0.031
+        },
+        {
+          "id": "edge-embedding.md#0",
+          "score": 0.031
+        }
+      ]
+    },
+    {
+      "query": "怎么在 AMD 平台上部署 seekdb",
+      "rep": 1,
+      "qEmbedMs": 2.72,
+      "httpMs": 47.68,
+      "dbMs": 45.76,
+      "e2eMs": 50.4,
+      "resultCount": 5,
+      "top1": "amd-radeon.md#0",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "怎么在 AMD 平台上部署 seekdb",
+      "rep": 2,
+      "qEmbedMs": 2.4,
+      "httpMs": 49.96,
+      "dbMs": 48.24,
+      "e2eMs": 52.36,
+      "resultCount": 5,
+      "top1": "amd-radeon.md#0",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "怎么在 AMD 平台上部署 seekdb",
+      "rep": 3,
+      "qEmbedMs": 2.13,
+      "httpMs": 49.37,
+      "dbMs": 47.61,
+      "e2eMs": 51.5,
+      "resultCount": 5,
+      "top1": "amd-radeon.md#0",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "怎么在 AMD 平台上部署 seekdb",
+      "rep": 4,
+      "qEmbedMs": 2.25,
+      "httpMs": 50.14,
+      "dbMs": 48.06,
+      "e2eMs": 52.39,
+      "resultCount": 5,
+      "top1": "amd-radeon.md#0",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "全文索引用哪个分词器处理中文",
+      "rep": 0,
+      "qEmbedMs": 2.72,
+      "httpMs": 48.54,
+      "dbMs": 46.76,
+      "e2eMs": 51.25,
+      "resultCount": 5,
+      "top1": "fulltext-index.md#0",
+      "top1Score": 0.0323,
+      "results": [
+        {
+          "id": "fulltext-index.md#0",
+          "score": 0.0323
+        },
+        {
+          "id": "fulltext-index.md#1",
+          "score": 0.0323
+        },
+        {
+          "id": "edge-embedding.md#1",
+          "score": 0.0164
+        },
+        {
+          "id": "edge-embedding.md#0",
+          "score": 0.0156
+        },
+        {
+          "id": "amd-radeon.md#0",
+          "score": 0.0154
+        }
+      ]
+    },
+    {
+      "query": "全文索引用哪个分词器处理中文",
+      "rep": 1,
+      "qEmbedMs": 2.35,
+      "httpMs": 50.38,
+      "dbMs": 48.3,
+      "e2eMs": 52.73,
+      "resultCount": 5,
+      "top1": "fulltext-index.md#0",
+      "top1Score": 0.0323
+    },
+    {
+      "query": "全文索引用哪个分词器处理中文",
+      "rep": 2,
+      "qEmbedMs": 2.38,
+      "httpMs": 48.82,
+      "dbMs": 46.92,
+      "e2eMs": 51.2,
+      "resultCount": 5,
+      "top1": "fulltext-index.md#0",
+      "top1Score": 0.0323
+    },
+    {
+      "query": "全文索引用哪个分词器处理中文",
+      "rep": 3,
+      "qEmbedMs": 2.23,
+      "httpMs": 45.86,
+      "dbMs": 44.37,
+      "e2eMs": 48.09,
+      "resultCount": 5,
+      "top1": "fulltext-index.md#0",
+      "top1Score": 0.0323
+    },
+    {
+      "query": "全文索引用哪个分词器处理中文",
+      "rep": 4,
+      "qEmbedMs": 2.31,
+      "httpMs": 46.4,
+      "dbMs": 45.03,
+      "e2eMs": 48.71,
+      "resultCount": 5,
+      "top1": "fulltext-index.md#0",
+      "top1Score": 0.0323
+    },
+    {
+      "query": "如何获取部署实例的遥测 ID",
+      "rep": 0,
+      "qEmbedMs": 1.97,
+      "httpMs": 49.7,
+      "dbMs": 48.35,
+      "e2eMs": 51.67,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.032,
+      "results": [
+        {
+          "id": "edge-embedding.md#1",
+          "score": 0.032
+        },
+        {
+          "id": "amd-radeon.md#0",
+          "score": 0.0318
+        },
+        {
+          "id": "amd-radeon.md#1",
+          "score": 0.0318
+        },
+        {
+          "id": "fulltext-index.md#1",
+          "score": 0.0317
+        },
+        {
+          "id": "edge-embedding.md#0",
+          "score": 0.0305
+        }
+      ]
+    },
+    {
+      "query": "如何获取部署实例的遥测 ID",
+      "rep": 1,
+      "qEmbedMs": 2.66,
+      "httpMs": 53.73,
+      "dbMs": 51.54,
+      "e2eMs": 56.38,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.032
+    },
+    {
+      "query": "如何获取部署实例的遥测 ID",
+      "rep": 2,
+      "qEmbedMs": 2.93,
+      "httpMs": 48.5,
+      "dbMs": 46.68,
+      "e2eMs": 51.43,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.032
+    },
+    {
+      "query": "如何获取部署实例的遥测 ID",
+      "rep": 3,
+      "qEmbedMs": 2.49,
+      "httpMs": 48.72,
+      "dbMs": 47.26,
+      "e2eMs": 51.21,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.032
+    },
+    {
+      "query": "如何获取部署实例的遥测 ID",
+      "rep": 4,
+      "qEmbedMs": 2.18,
+      "httpMs": 46.35,
+      "dbMs": 44.75,
+      "e2eMs": 48.53,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.032
+    },
+    {
+      "query": "向量检索和全文检索怎么融合",
+      "rep": 0,
+      "qEmbedMs": 2.25,
+      "httpMs": 49.72,
+      "dbMs": 48.22,
+      "e2eMs": 51.97,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0325,
+      "results": [
+        {
+          "id": "edge-embedding.md#1",
+          "score": 0.0325
+        },
+        {
+          "id": "fulltext-index.md#1",
+          "score": 0.0325
+        },
+        {
+          "id": "fulltext-index.md#0",
+          "score": 0.0317
+        },
+        {
+          "id": "edge-embedding.md#0",
+          "score": 0.0313
+        },
+        {
+          "id": "amd-radeon.md#0",
+          "score": 0.0154
+        }
+      ]
+    },
+    {
+      "query": "向量检索和全文检索怎么融合",
+      "rep": 1,
+      "qEmbedMs": 2.62,
+      "httpMs": 48.92,
+      "dbMs": 47.43,
+      "e2eMs": 51.54,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0325
+    },
+    {
+      "query": "向量检索和全文检索怎么融合",
+      "rep": 2,
+      "qEmbedMs": 2.36,
+      "httpMs": 50.73,
+      "dbMs": 49.26,
+      "e2eMs": 53.1,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0325
+    },
+    {
+      "query": "向量检索和全文检索怎么融合",
+      "rep": 3,
+      "qEmbedMs": 2.24,
+      "httpMs": 49.29,
+      "dbMs": 47.7,
+      "e2eMs": 51.53,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0325
+    },
+    {
+      "query": "向量检索和全文检索怎么融合",
+      "rep": 4,
+      "qEmbedMs": 2.5,
+      "httpMs": 49.09,
+      "dbMs": 47.64,
+      "e2eMs": 51.58,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0325
+    },
+    {
+      "query": "为什么写入后马上查不到",
+      "rep": 0,
+      "qEmbedMs": 2.59,
+      "httpMs": 49.16,
+      "dbMs": 47.89,
+      "e2eMs": 51.75,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328,
+      "results": [
+        {
+          "id": "edge-embedding.md#1",
+          "score": 0.0328
+        },
+        {
+          "id": "fulltext-index.md#0",
+          "score": 0.0318
+        },
+        {
+          "id": "amd-radeon.md#1",
+          "score": 0.0315
+        },
+        {
+          "id": "edge-embedding.md#0",
+          "score": 0.0313
+        },
+        {
+          "id": "amd-radeon.md#0",
+          "score": 0.0308
+        }
+      ]
+    },
+    {
+      "query": "为什么写入后马上查不到",
+      "rep": 1,
+      "qEmbedMs": 1.96,
+      "httpMs": 46.14,
+      "dbMs": 44.9,
+      "e2eMs": 48.1,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "为什么写入后马上查不到",
+      "rep": 2,
+      "qEmbedMs": 1.94,
+      "httpMs": 46.04,
+      "dbMs": 44.92,
+      "e2eMs": 47.97,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "为什么写入后马上查不到",
+      "rep": 3,
+      "qEmbedMs": 1.98,
+      "httpMs": 45.62,
+      "dbMs": 44.52,
+      "e2eMs": 47.6,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "为什么写入后马上查不到",
+      "rep": 4,
+      "qEmbedMs": 1.83,
+      "httpMs": 46.01,
+      "dbMs": 44.78,
+      "e2eMs": 47.85,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "INT8 和 FP16 怎么选",
+      "rep": 0,
+      "qEmbedMs": 1.91,
+      "httpMs": 47.04,
+      "dbMs": 45.44,
+      "e2eMs": 48.95,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#0",
+      "top1Score": 0.0328,
+      "results": [
+        {
+          "id": "edge-embedding.md#0",
+          "score": 0.0328
+        },
+        {
+          "id": "edge-embedding.md#1",
+          "score": 0.032
+        },
+        {
+          "id": "fulltext-index.md#0",
+          "score": 0.0318
+        },
+        {
+          "id": "fulltext-index.md#1",
+          "score": 0.0315
+        },
+        {
+          "id": "amd-radeon.md#0",
+          "score": 0.0154
+        }
+      ]
+    },
+    {
+      "query": "INT8 和 FP16 怎么选",
+      "rep": 1,
+      "qEmbedMs": 2.01,
+      "httpMs": 45.26,
+      "dbMs": 44.02,
+      "e2eMs": 47.27,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#0",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "INT8 和 FP16 怎么选",
+      "rep": 2,
+      "qEmbedMs": 2.23,
+      "httpMs": 45.9,
+      "dbMs": 44.59,
+      "e2eMs": 48.13,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#0",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "INT8 和 FP16 怎么选",
+      "rep": 3,
+      "qEmbedMs": 2.55,
+      "httpMs": 49.4,
+      "dbMs": 47.97,
+      "e2eMs": 51.95,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#0",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "INT8 和 FP16 怎么选",
+      "rep": 4,
+      "qEmbedMs": 2.2,
+      "httpMs": 46.06,
+      "dbMs": 44.86,
+      "e2eMs": 48.26,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#0",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "WebGPU 不可用会怎样",
+      "rep": 0,
+      "qEmbedMs": 1.87,
+      "httpMs": 46.24,
+      "dbMs": 45.18,
+      "e2eMs": 48.11,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#0",
+      "top1Score": 0.0328,
+      "results": [
+        {
+          "id": "edge-embedding.md#0",
+          "score": 0.0328
+        },
+        {
+          "id": "fulltext-index.md#1",
+          "score": 0.0161
+        },
+        {
+          "id": "edge-embedding.md#1",
+          "score": 0.0159
+        },
+        {
+          "id": "fulltext-index.md#0",
+          "score": 0.0156
+        },
+        {
+          "id": "amd-radeon.md#0",
+          "score": 0.0154
+        }
+      ]
+    },
+    {
+      "query": "WebGPU 不可用会怎样",
+      "rep": 1,
+      "qEmbedMs": 2.25,
+      "httpMs": 49.51,
+      "dbMs": 47.75,
+      "e2eMs": 51.76,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#0",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "WebGPU 不可用会怎样",
+      "rep": 2,
+      "qEmbedMs": 2.16,
+      "httpMs": 45.89,
+      "dbMs": 44.51,
+      "e2eMs": 48.04,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#0",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "WebGPU 不可用会怎样",
+      "rep": 3,
+      "qEmbedMs": 1.97,
+      "httpMs": 45.66,
+      "dbMs": 44.15,
+      "e2eMs": 47.63,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#0",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "WebGPU 不可用会怎样",
+      "rep": 4,
+      "qEmbedMs": 1.93,
+      "httpMs": 46.42,
+      "dbMs": 44.61,
+      "e2eMs": 48.35,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#0",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "增量导入后索引怎么刷新",
+      "rep": 0,
+      "qEmbedMs": 2.38,
+      "httpMs": 49.75,
+      "dbMs": 48.11,
+      "e2eMs": 52.12,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328,
+      "results": [
+        {
+          "id": "edge-embedding.md#1",
+          "score": 0.0328
+        },
+        {
+          "id": "fulltext-index.md#0",
+          "score": 0.032
+        },
+        {
+          "id": "amd-radeon.md#1",
+          "score": 0.0313
+        },
+        {
+          "id": "edge-embedding.md#0",
+          "score": 0.0313
+        },
+        {
+          "id": "amd-radeon.md#0",
+          "score": 0.0305
+        }
+      ]
+    },
+    {
+      "query": "增量导入后索引怎么刷新",
+      "rep": 1,
+      "qEmbedMs": 2.03,
+      "httpMs": 50,
+      "dbMs": 48.17,
+      "e2eMs": 52.03,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "增量导入后索引怎么刷新",
+      "rep": 2,
+      "qEmbedMs": 2.58,
+      "httpMs": 49.2,
+      "dbMs": 47.69,
+      "e2eMs": 51.77,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "增量导入后索引怎么刷新",
+      "rep": 3,
+      "qEmbedMs": 2.46,
+      "httpMs": 49.95,
+      "dbMs": 48.09,
+      "e2eMs": 52.41,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "增量导入后索引怎么刷新",
+      "rep": 4,
+      "qEmbedMs": 2.25,
+      "httpMs": 48.77,
+      "dbMs": 47.37,
+      "e2eMs": 51.02,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "seekdb 的最小资源要求",
+      "rep": 0,
+      "qEmbedMs": 2.31,
+      "httpMs": 46.3,
+      "dbMs": 45.11,
+      "e2eMs": 48.62,
+      "resultCount": 5,
+      "top1": "amd-radeon.md#0",
+      "top1Score": 0.0323,
+      "results": [
+        {
+          "id": "amd-radeon.md#0",
+          "score": 0.0323
+        },
+        {
+          "id": "fulltext-index.md#0",
+          "score": 0.032
+        },
+        {
+          "id": "amd-radeon.md#1",
+          "score": 0.0318
+        },
+        {
+          "id": "fulltext-index.md#1",
+          "score": 0.0317
+        },
+        {
+          "id": "edge-embedding.md#1",
+          "score": 0.031
+        }
+      ]
+    },
+    {
+      "query": "seekdb 的最小资源要求",
+      "rep": 1,
+      "qEmbedMs": 2.09,
+      "httpMs": 45.5,
+      "dbMs": 44.13,
+      "e2eMs": 47.6,
+      "resultCount": 5,
+      "top1": "amd-radeon.md#0",
+      "top1Score": 0.0323
+    },
+    {
+      "query": "seekdb 的最小资源要求",
+      "rep": 2,
+      "qEmbedMs": 2.31,
+      "httpMs": 45.84,
+      "dbMs": 44.41,
+      "e2eMs": 48.14,
+      "resultCount": 5,
+      "top1": "amd-radeon.md#0",
+      "top1Score": 0.0323
+    },
+    {
+      "query": "seekdb 的最小资源要求",
+      "rep": 3,
+      "qEmbedMs": 2.02,
+      "httpMs": 49.54,
+      "dbMs": 48.16,
+      "e2eMs": 51.57,
+      "resultCount": 5,
+      "top1": "amd-radeon.md#0",
+      "top1Score": 0.0323
+    },
+    {
+      "query": "seekdb 的最小资源要求",
+      "rep": 4,
+      "qEmbedMs": 2.13,
+      "httpMs": 45.99,
+      "dbMs": 44.42,
+      "e2eMs": 48.12,
+      "resultCount": 5,
+      "top1": "amd-radeon.md#0",
+      "top1Score": 0.0323
+    },
+    {
+      "query": "批处理为什么更快",
+      "rep": 0,
+      "qEmbedMs": 2.3,
+      "httpMs": 45.43,
+      "dbMs": 43.97,
+      "e2eMs": 47.73,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328,
+      "results": [
+        {
+          "id": "edge-embedding.md#1",
+          "score": 0.0328
+        },
+        {
+          "id": "edge-embedding.md#0",
+          "score": 0.0313
+        },
+        {
+          "id": "fulltext-index.md#1",
+          "score": 0.0161
+        },
+        {
+          "id": "fulltext-index.md#0",
+          "score": 0.0159
+        },
+        {
+          "id": "amd-radeon.md#1",
+          "score": 0.0156
+        }
+      ]
+    },
+    {
+      "query": "批处理为什么更快",
+      "rep": 1,
+      "qEmbedMs": 2.01,
+      "httpMs": 46.16,
+      "dbMs": 44.78,
+      "e2eMs": 48.18,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "批处理为什么更快",
+      "rep": 2,
+      "qEmbedMs": 2.18,
+      "httpMs": 46.26,
+      "dbMs": 44.74,
+      "e2eMs": 48.44,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "批处理为什么更快",
+      "rep": 3,
+      "qEmbedMs": 2.26,
+      "httpMs": 49.69,
+      "dbMs": 48.03,
+      "e2eMs": 51.95,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328
+    },
+    {
+      "query": "批处理为什么更快",
+      "rep": 4,
+      "qEmbedMs": 2.17,
+      "httpMs": 45.82,
+      "dbMs": 44.39,
+      "e2eMs": 48,
+      "resultCount": 5,
+      "top1": "edge-embedding.md#1",
+      "top1Score": 0.0328
+    }
+  ]
+}

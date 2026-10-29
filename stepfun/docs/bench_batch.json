@@ -1,0 +1,113 @@
+{
+  "model": "Xenova/all-MiniLM-L6-v2",
+  "runtime": "Node v24.9.0 / onnxruntime-node CPU EP",
+  "textCount": 36,
+  "passes": 5,
+  "measuredAt": "2026-10-29T12:54:04.432Z",
+  "results": [
+    {
+      "dtype": "fp32",
+      "batch": 1,
+      "docsPerSec": 82.14,
+      "passes": [
+        79.74,
+        82.14,
+        82.48,
+        81.12,
+        83.75
+      ],
+      "speedupVsBatch1": 1
+    },
+    {
+      "dtype": "fp32",
+      "batch": 4,
+      "docsPerSec": 64.92,
+      "passes": [
+        70.64,
+        66.56,
+        63.94,
+        64.35,
+        64.92
+      ],
+      "speedupVsBatch1": 0.79
+    },
+    {
+      "dtype": "fp32",
+      "batch": 8,
+      "docsPerSec": 45.45,
+      "passes": [
+        45.78,
+        45.11,
+        45.2,
+        45.45,
+        45.59
+      ],
+      "speedupVsBatch1": 0.55
+    },
+    {
+      "dtype": "fp32",
+      "batch": 16,
+      "docsPerSec": 37.53,
+      "passes": [
+        37.53,
+        36.52,
+        36.43,
+        38.4,
+        38.8
+      ],
+      "speedupVsBatch1": 0.46
+    },
+    {
+      "dtype": "q8",
+      "batch": 1,
+      "docsPerSec": 91.78,
+      "passes": [
+        88.75,
+        87.11,
+        91.78,
+        94.99,
+        92.43
+      ],
+      "speedupVsBatch1": 1
+    },
+    {
+      "dtype": "q8",
+      "batch": 4,
+      "docsPerSec": 82.01,
+      "passes": [
+        82.01,
+        80.3,
+        81.6,
+        83.94,
+        83.07
+      ],
+      "speedupVsBatch1": 0.89
+    },
+    {
+      "dtype": "q8",
+      "batch": 8,
+      "docsPerSec": 48.68,
+      "passes": [
+        48.68,
+        48.72,
+        48.27,
+        49.37,
+        48.37
+      ],
+      "speedupVsBatch1": 0.53
+    },
+    {
+      "dtype": "q8",
+      "batch": 16,
+      "docsPerSec": 42.18,
+      "passes": [
+        42.18,
+        42.43,
+        42.95,
+        41.53,
+        41.52
+      ],
+      "speedupVsBatch1": 0.46
+    }
+  ]
+}

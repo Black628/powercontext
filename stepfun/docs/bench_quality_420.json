@@ -1,0 +1,1011 @@
+{
+  "model": "Xenova/all-MiniLM-L6-v2",
+  "runtime": "Node v24.9.0 / onnxruntime-node CPU EP",
+  "measuredAt": "2026-10-29T12:49:44.245Z",
+  "chunkSize": 420,
+  "batchSize": 8,
+  "queryRepeats": 15,
+  "queryCount": 10,
+  "chunks": [
+    {
+      "id": "amd-radeon.md#0",
+      "source": "amd-radeon.md",
+      "chunk": 0,
+      "chars": 407,
+      "text": "# 在 AMD Radeon 平台部署 seekdb\n\n## 申请资源\n\n登录 AMD 平台账号，进入 Active Instance 申请算力，选择带 GPU 的实例启动。\n实验环境启动后进入 Notebook，打开 Terminal 即可执行命令。\n\n## 启动 seekdb\n\n```bash\ndocker run -d --name seekdb -p 2881:2881 oceanbase/seekdb\ndocker exec -it seekdb mysql -h127.0.0.1 -P2881 -uroot -e \"select version();\"\n```\n\n端口 2881 是 MySQL 协议端口，2886 是 obshell 图形面板。\n镜像拉不动时可以换 quay.io/oceanbase/seekdb 或 ghcr.io/oceanbase/seekdb。\n\n## 获取遥测 ID"
+    },
+    {
+      "id": "amd-radeon.md#1",
+      "source": "amd-radeon.md",
+      "chunk": 1,
+      "chars": 279,
+      "text": "部署成功后，在运行目录下的 run/telemetry.json 中读取 content.id，即 36 位 UUID。\n\n```bash\npython3 -c 'import json; print(json.load(open(\"run/telemetry.json\"))[\"content\"][\"id\"])'\n```\n\n## 资源要求\n\n至少 1 核 CPU、2GB 内存、5GB 磁盘。内存不足时实例会启动失败，可通过\ndocker logs seekdb 查看具体报错。实验结束后记得 Active Instance → Destroy 释放环境。"
+    },
+    {
+      "id": "edge-embedding.md#0",
+      "source": "edge-embedding.md",
+      "chunk": 0,
+      "chars": 382,
+      "text": "# 端侧向量化与知识库检索\n\n## 为什么要端侧推理\n\n在浏览器里跑 embedding 模型，文档不需要离开用户设备，隐私与延迟都更友好。\n模型首次从 CDN 下载并缓存到浏览器 Cache Storage，之后离线也能用。\n\n## 量化方案怎么选\n\nFP32 是基线，体积最大、精度最高。\nINT8（q8）体积约压到四分之一，WASM 后端上速度明显更快。\nFP16 体积约减半，配合 WebGPU 可以走半精度矩阵乘法，适合有独显的设备。\n选择哪种取决于设备：有 WebGPU 优先 fp16，否则用 wasm + q8。\n\n## 推理后端\n\nWebGPU 通过 navigator.gpu 探测，可用时把 device 设为 webgpu。\n不可用时必须优雅降级到 WASM，并在界面上明确告诉用户当前后端，\n否则用户会以为是模型变慢了。\n\n## 检索链路"
+    },
+    {
+      "id": "edge-embedding.md#1",
+      "source": "edge-embedding.md",
+      "chunk": 1,
+      "chars": 234,
+      "text": "导入：读取文件 → 切片 → 批量向量化 → 写入数据库 → 刷新索引。\n查询：输入文本 → 向量化 → 数据库混合检索 → 展示原文与打分。\n\n刷新索引这一步容易漏。向量索引多为异步维护，写入后不刷新，\n新文档可能短时间内查不到，看起来像\"增量导入失效\"。\n\n## 性能优化点\n\n批处理比逐条推理快很多，因为矩阵乘法的并行度更高。\n模型加载只发生一次，要把加载耗时和推理耗时分开统计。\n查询路径上，向量化通常在几十毫秒，数据库检索往往更快，端到端延迟主要看前端渲染。"
+    },
+    {
+      "id": "fulltext-index.md#0",
+      "source": "fulltext-index.md",
+      "chunk": 0,
+      "chars": 342,
+      "text": "# seekdb 全文索引与分词器\n\n## 全文索引怎么用\n\n建表后可以直接加全文索引，指定分词器：\n\n```sql\nALTER TABLE docs ADD FULLTEXT INDEX fti_ik(title, content) WITH PARSER ik;\nALTER TABLE docs ADD FULLTEXT INDEX fti_en(title_en, content_en) WITH PARSER beng;\n```\n\n查询使用 MATCH ... AGAINST：\n\n```sql\nSELECT COUNT(*) FROM docs WHERE MATCH(title, content) AGAINST('全文索引 分词器');\n```\n\n## 内置分词器"
+    },
+    {
+      "id": "fulltext-index.md#1",
+      "source": "fulltext-index.md",
+      "chunk": 1,
+      "chars": 324,
+      "text": "seekdb 自带 ik、beng、space、ngram、ngram2 等分词器。\nik 面向中文，支持 smart 与 max_word 两种模式；beng 面向英文；\nngram 适合没有空格分隔的语言或模糊匹配场景。\n\n## 分词热路径\n\n每次分词都要准备解析器、词典与停用词表。把解析器实例复用、\n停用词表做成全局单例、分词中间结构内存池化，可以显著降低单次分词开销。\n中文分词的主要成本在查词典和判断停用词，英文分词则集中在大小写转换与切分。\n\n## 混合检索\n\n向量检索擅长语义相近，全文检索擅长关键词精确命中。\n把两路结果做 RRF（倒数排名融合）通常比单路更稳：\n既不会因为语义漂移漏掉关键词文档，也不会因为生僻词丢掉语义相似项。"
+    }
+  ],
+  "queries": [
+    {
+      "q": "怎么在 AMD 平台上部署 seekdb",
+      "relevantCount": 1,
+      "relevance": {
+        "amd-radeon.md#0": 2
+      }
+    },
+    {
+      "q": "全文索引用哪个分词器处理中文",
+      "relevantCount": 2,
+      "relevance": {
+        "fulltext-index.md#0": 2,
+        "fulltext-index.md#1": 2
+      }
+    },
+    {
+      "q": "如何获取部署实例的遥测 ID",
+      "relevantCount": 1,
+      "relevance": {
+        "amd-radeon.md#1": 2
+      }
+    },
+    {
+      "q": "向量检索和全文检索怎么融合",
+      "relevantCount": 2,
+      "relevance": {
+        "edge-embedding.md#1": 1,
+        "fulltext-index.md#1": 2
+      }
+    },
+    {
+      "q": "为什么写入后马上查不到",
+      "relevantCount": 1,
+      "relevance": {
+        "edge-embedding.md#1": 2
+      }
+    },
+    {
+      "q": "INT8 和 FP16 怎么选",
+      "relevantCount": 1,
+      "relevance": {
+        "edge-embedding.md#0": 2
+      }
+    },
+    {
+      "q": "WebGPU 不可用会怎样",
+      "relevantCount": 1,
+      "relevance": {
+        "edge-embedding.md#0": 2
+      }
+    },
+    {
+      "q": "增量导入后索引怎么刷新",
+      "relevantCount": 1,
+      "relevance": {
+        "edge-embedding.md#1": 2
+      }
+    },
+    {
+      "q": "seekdb 的最小资源要求",
+      "relevantCount": 1,
+      "relevance": {
+        "amd-radeon.md#1": 2
+      }
+    },
+    {
+      "q": "批处理为什么更快",
+      "relevantCount": 1,
+      "relevance": {
+        "edge-embedding.md#1": 2
+      }
+    }
+  ],
+  "results": [
+    {
+      "dtype": "fp32",
+      "loadMs": 136.9,
+      "chunkCount": 6,
+      "batchSize": 8,
+      "throughputPasses": [
+        {
+          "ms": 114.2,
+          "docsPerSec": 52.56
+        },
+        {
+          "ms": 102.1,
+          "docsPerSec": 58.75
+        },
+        {
+          "ms": 100.4,
+          "docsPerSec": 59.78
+        },
+        {
+          "ms": 102.6,
+          "docsPerSec": 58.5
+        },
+        {
+          "ms": 107.1,
+          "docsPerSec": 56.04
+        }
+      ],
+      "throughputMedianDocsPerSec": 58.5,
+      "queryLatencySamples": [
+        1.78,
+        1.87,
+        1.67,
+        1.72,
+        1.64,
+        1.51,
+        1.65,
+        1.6,
+        1.48,
+        1.44,
+        1.84,
+        1.92,
+        1.95,
+        1.65,
+        1.57
+      ],
+      "queryLatencyMedianMs": 1.65,
+      "queryLatencyP95Ms": 1.92,
+      "recallAt5": 1,
+      "strictRecallAt5": 1,
+      "looseRecallAt5": 1,
+      "ndcgAt5": 0.8264,
+      "mrrAt5": 0.79,
+      "perQuery": [
+        {
+          "query": "怎么在 AMD 平台上部署 seekdb",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.4536,
+              "grade": 2
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.3779,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.3062,
+              "grade": 0
+            },
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.2821,
+              "grade": 0
+            },
+            {
+              "id": "edge-embedding.md#0",
+              "score": 0.282,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 1,
+          "ndcgAt5": 1
+        },
+        {
+          "query": "全文索引用哪个分词器处理中文",
+          "relevantCount": 2,
+          "grade2Count": 2,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.5594,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.5065,
+              "grade": 2
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.4189,
+              "grade": 2
+            },
+            {
+              "id": "edge-embedding.md#0",
+              "score": 0.2625,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.1101,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 2,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 0.5,
+          "ndcgAt5": 0.6934264036172708
+        },
+        {
+          "query": "如何获取部署实例的遥测 ID",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.3498,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.3432,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.2253,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.2204,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#1",
+              "score": 0.2088,
+              "grade": 2
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 0.2,
+          "ndcgAt5": 0.38685280723454163
+        },
+        {
+          "query": "向量检索和全文检索怎么融合",
+          "relevantCount": 2,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.5365,
+              "grade": 1
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.5155,
+              "grade": 2
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.3702,
+              "grade": 0
+            },
+            {
+              "id": "edge-embedding.md#0",
+              "score": 0.2896,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.1053,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 2,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 1,
+          "ndcgAt5": 0.7967075809905066
+        },
+        {
+          "query": "为什么写入后马上查不到",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.4088,
+              "grade": 2
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.2476,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.1711,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#1",
+              "score": 0.167,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.0865,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 1,
+          "ndcgAt5": 1
+        },
+        {
+          "query": "INT8 和 FP16 怎么选",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#0",
+              "score": 0.4319,
+              "grade": 2
+            },
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.3094,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.2562,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.2275,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.1672,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 1,
+          "ndcgAt5": 1
+        },
+        {
+          "query": "WebGPU 不可用会怎样",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#0",
+              "score": 0.3646,
+              "grade": 2
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.308,
+              "grade": 0
+            },
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.2561,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.2454,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#1",
+              "score": 0.1732,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 1,
+          "ndcgAt5": 1
+        },
+        {
+          "query": "增量导入后索引怎么刷新",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.4233,
+              "grade": 2
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.2705,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.2547,
+              "grade": 0
+            },
+            {
+              "id": "edge-embedding.md#0",
+              "score": 0.1197,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.0478,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 1,
+          "ndcgAt5": 1
+        },
+        {
+          "query": "seekdb 的最小资源要求",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.5157,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.4118,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.3284,
+              "grade": 0
+            },
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.3262,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#1",
+              "score": 0.2562,
+              "grade": 2
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 0.2,
+          "ndcgAt5": 0.38685280723454163
+        },
+        {
+          "query": "批处理为什么更快",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.2918,
+              "grade": 2
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.2422,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.2056,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#1",
+              "score": 0.1574,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.1286,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 1,
+          "ndcgAt5": 1
+        }
+      ],
+      "deltaVsFp32": {
+        "recallAt5": 0,
+        "strictRecallAt5": 0,
+        "ndcgAt5": 0,
+        "throughputMedianDocsPerSec": 0
+      }
+    },
+    {
+      "dtype": "q8",
+      "loadMs": 90,
+      "chunkCount": 6,
+      "batchSize": 8,
+      "throughputPasses": [
+        {
+          "ms": 79.8,
+          "docsPerSec": 75.17
+        },
+        {
+          "ms": 89.3,
+          "docsPerSec": 67.18
+        },
+        {
+          "ms": 90.3,
+          "docsPerSec": 66.47
+        },
+        {
+          "ms": 89.9,
+          "docsPerSec": 66.71
+        },
+        {
+          "ms": 90.7,
+          "docsPerSec": 66.15
+        }
+      ],
+      "throughputMedianDocsPerSec": 66.71,
+      "queryLatencySamples": [
+        1.71,
+        1.7,
+        1.61,
+        1.67,
+        1.64,
+        1.5,
+        1.5,
+        1.55,
+        1.52,
+        1.45,
+        1.66,
+        1.69,
+        1.59,
+        1.78,
+        1.92
+      ],
+      "queryLatencyMedianMs": 1.64,
+      "queryLatencyP95Ms": 1.78,
+      "recallAt5": 1,
+      "strictRecallAt5": 1,
+      "looseRecallAt5": 1,
+      "ndcgAt5": 0.8308,
+      "mrrAt5": 0.795,
+      "perQuery": [
+        {
+          "query": "怎么在 AMD 平台上部署 seekdb",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.4572,
+              "grade": 2
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.337,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.3073,
+              "grade": 0
+            },
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.2621,
+              "grade": 0
+            },
+            {
+              "id": "edge-embedding.md#0",
+              "score": 0.2584,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 1,
+          "ndcgAt5": 1
+        },
+        {
+          "query": "全文索引用哪个分词器处理中文",
+          "relevantCount": 2,
+          "grade2Count": 2,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.589,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.5318,
+              "grade": 2
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.3641,
+              "grade": 2
+            },
+            {
+              "id": "edge-embedding.md#0",
+              "score": 0.2242,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.1205,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 2,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 0.5,
+          "ndcgAt5": 0.6934264036172708
+        },
+        {
+          "query": "如何获取部署实例的遥测 ID",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.3437,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.3145,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.2406,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#1",
+              "score": 0.2339,
+              "grade": 2
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.2311,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 0.25,
+          "ndcgAt5": 0.4306765580733931
+        },
+        {
+          "query": "向量检索和全文检索怎么融合",
+          "relevantCount": 2,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.5348,
+              "grade": 1
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.5302,
+              "grade": 2
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.3388,
+              "grade": 0
+            },
+            {
+              "id": "edge-embedding.md#0",
+              "score": 0.2335,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.1212,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 2,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 1,
+          "ndcgAt5": 0.7967075809905066
+        },
+        {
+          "query": "为什么写入后马上查不到",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.4297,
+              "grade": 2
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.2367,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.2233,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#1",
+              "score": 0.1596,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.1128,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 1,
+          "ndcgAt5": 1
+        },
+        {
+          "query": "INT8 和 FP16 怎么选",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#0",
+              "score": 0.41,
+              "grade": 2
+            },
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.2814,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.2495,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.2389,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.1604,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 1,
+          "ndcgAt5": 1
+        },
+        {
+          "query": "WebGPU 不可用会怎样",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#0",
+              "score": 0.3952,
+              "grade": 2
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.3432,
+              "grade": 0
+            },
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.272,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.2419,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.1836,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 1,
+          "ndcgAt5": 1
+        },
+        {
+          "query": "增量导入后索引怎么刷新",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.459,
+              "grade": 2
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.2992,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.2583,
+              "grade": 0
+            },
+            {
+              "id": "edge-embedding.md#0",
+              "score": 0.1261,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#1",
+              "score": 0.0733,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 1,
+          "ndcgAt5": 1
+        },
+        {
+          "query": "seekdb 的最小资源要求",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.4591,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.4172,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.3413,
+              "grade": 0
+            },
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.2986,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#1",
+              "score": 0.2561,
+              "grade": 2
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 0.2,
+          "ndcgAt5": 0.38685280723454163
+        },
+        {
+          "query": "批处理为什么更快",
+          "relevantCount": 1,
+          "grade2Count": 1,
+          "retrievedTop5": [
+            {
+              "id": "edge-embedding.md#1",
+              "score": 0.3014,
+              "grade": 2
+            },
+            {
+              "id": "fulltext-index.md#1",
+              "score": 0.2386,
+              "grade": 0
+            },
+            {
+              "id": "fulltext-index.md#0",
+              "score": 0.231,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#1",
+              "score": 0.1601,
+              "grade": 0
+            },
+            {
+              "id": "amd-radeon.md#0",
+              "score": 0.1556,
+              "grade": 0
+            }
+          ],
+          "hitsInTop5": 1,
+          "strictRecallAt5": 1,
+          "recallAt5": 1,
+          "hit": 1,
+          "mrr": 1,
+          "ndcgAt5": 1
+        }
+      ],
+      "deltaVsFp32": {
+        "recallAt5": 0,
+        "strictRecallAt5": 0,
+        "ndcgAt5": 0.0044,
+        "throughputMedianDocsPerSec": 8.21
+      }
+    }
+  ]
+}

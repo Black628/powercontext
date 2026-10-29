@@ -1,0 +1,65 @@
+{
+  "measuredAt": "2026-10-29T12:58:09.624Z",
+  "query": "怎么在 AMD 平台上部署 seekdb",
+  "reps": 20,
+  "modes": {
+    "hybrid": {
+      "samples": 20,
+      "dbMedianMs": 46.84,
+      "dbMinMs": 45.75,
+      "dbMaxMs": 134.18,
+      "wallMedianMs": 48.33,
+      "top5": [
+        {
+          "id": "amd-radeon.md#0",
+          "score": 0.0328
+        },
+        {
+          "id": "fulltext-index.md#0",
+          "score": 0.032
+        },
+        {
+          "id": "amd-radeon.md#1",
+          "score": 0.0313
+        },
+        {
+          "id": "edge-embedding.md#0",
+          "score": 0.031
+        },
+        {
+          "id": "fulltext-index.md#1",
+          "score": 0.0308
+        }
+      ]
+    },
+    "vectorOnly": {
+      "samples": 20,
+      "dbMedianMs": 46.83,
+      "dbMinMs": 43.17,
+      "dbMaxMs": 51.01,
+      "wallMedianMs": 47.94,
+      "top5": [
+        {
+          "id": "amd-radeon.md#0",
+          "score": 0.5671981266256145
+        },
+        {
+          "id": "fulltext-index.md#0",
+          "score": 0.6366988583444162
+        },
+        {
+          "id": "fulltext-index.md#1",
+          "score": 0.705231538570867
+        },
+        {
+          "id": "edge-embedding.md#1",
+          "score": 0.7159082036127782
+        },
+        {
+          "id": "edge-embedding.md#0",
+          "score": 0.7506681979100818
+        }
+      ]
+    }
+  }
+}

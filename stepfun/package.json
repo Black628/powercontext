@@ -1,0 +1,24 @@
+{
+  "name": "stepfun-edge-kb",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "端侧 AI 推理 + seekdb 混合检索的迷你知识库（浏览器本地向量化，seekdb 内完成向量/全文混合检索）",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "bench:size": "node scripts/bench-model-size.mjs",
+    "bench:quality": "node scripts/bench-quality.mjs",
+    "bench:batch": "node scripts/bench-batch.mjs",
+    "bench:e2e": "node scripts/bench-e2e.mjs",
+    "trace:sql": "node scripts/trace-sql.mjs",
+    "bench:all": "npm run bench:size && npm run bench:quality && npm run bench:batch && npm run bench:e2e && npm run trace:sql"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.5.1",
+    "seekdb": "^1.4.0"
+  }
+}

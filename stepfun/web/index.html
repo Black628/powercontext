@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>端侧知识库 · 浏览器向量化 + seekdb 混合检索</title>
+  <link rel="stylesheet" href="/web/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo">◈</span>
+      <div>
+        <h1>端侧知识库</h1>
+        <p class="sub">浏览器本地向量化 · seekdb 混合检索（向量 + 全文，RRF 由数据库融合）</p>
+      </div>
+    </div>
+    <div class="badges">
+      <span id="badge-backend" class="badge badge-wait" title="推理后端">后端：检测中…</span>
+      <span id="badge-model" class="badge" title="模型">模型：—</span>
+      <span id="badge-db" class="badge badge-wait" title="seekdb 连接">seekdb：检测中…</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- 左：导入 -->
+    <section class="panel">
+      <h2>1 · 导入语料</h2>
+      <p class="hint">文本在浏览器内切片并向量化，向量随原文一起写入 seekdb。服务端不做任何向量计算。</p>
+
+      <div id="dropzone" class="dropzone">
+        <input id="file-input" type="file" multiple accept=".txt,.md,.markdown,.json,.csv,.log" hidden />
+        <p><strong>点击选择</strong> 或把 .txt / .md 文件拖进来</p>
+        <p class="mini">没有素材？<button id="btn-sample" class="link">加载示例语料</button></p>
+      </div>
+
+      <div class="row">
+        <label>切片长度 <input id="chunk-size" type="number" min="120" max="2000" step="20" value="420" /></label>
+        <label>批大小 <input id="batch-size" type="number" min="1" max="64" step="1" value="8" /></label>
+      </div>
+
+      <div class="progress"><div id="import-bar" class="bar"></div></div>
+      <p id="import-status" class="status">等待导入…</p>
+      <p class="mini" id="collection-info">集合：—</p>
+
+      <div class="row">
+        <button id="btn-reset" class="ghost">清空集合</button>
+      </div>
+    </section>
+
+    <!-- 右：检索 -->
+    <section class="panel">
+      <h2>2 · 混合检索</h2>
+      <p class="hint">查询串在浏览器内向量化；向量与全文两路由 seekdb 的 hybridSearch 完成并 RRF 融合。</p>
+
+      <div class="row">
+        <input id="query" type="search" placeholder="例如：怎么在 AMD 上部署 seekdb" autocomplete="off" />
+        <button id="btn-search" class="primary">检索</button>
+      </div>
+      <div class="row">
+        <label>Top K <input id="topk" type="number" min="1" max="20" value="5" /></label>
+        <label class="check"><input id="repeat" type="checkbox" /> 连跑 5 次取中位数</label>
+      </div>
+
+      <ol id="results" class="results"></ol>
+      <p id="search-status" class="status">输入查询开始检索…</p>
+    </section>
+  </main>
+
+  <!-- 指标 -->
+  <section class="panel metrics">
+    <h2>3 · 实测指标</h2>
+    <div class="metrics-grid">
+      <div><span class="k">模型加载</span><span id="m-load" class="v">—</span></div>
+      <div><span class="k">文档向量化</span><span id="m-embed" class="v">—</span></div>
+      <div><span class="k">写入 + 索引刷新</span><span id="m-write" class="v">—</span></div>
+      <div><span class="k">查询向量化</span><span id="m-qembed" class="v">—</span></div>
+      <div><span class="k">seekdb 检索</span><span id="m-db" class="v">—</span></div>
+      <div><span class="k">端到端（提交→可见）</span><span id="m-e2e" class="v">—</span></div>
+    </div>
+    <div class="row">
+      <button id="btn-export" class="ghost">导出指标 JSON</button>
+      <span id="export-status" class="mini"></span>
+    </div>
+    <pre id="log" class="log"></pre>
+  </section>
+
+  <script type="module" src="/web/app.js"></script>
+</body>
+</html>
