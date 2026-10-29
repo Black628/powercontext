@@ -1,0 +1,18 @@
+{
+  "name": "stepfun-edge-kb",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "端侧 AI 推理 + seekdb 混合检索的迷你知识库（浏览器本地向量化，seekdb 内完成向量/全文混合检索）",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.mjs",
+    "smoke": "node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.5.1",
+    "seekdb": "^1.4.0"
+  }
+}
