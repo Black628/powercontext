@@ -1,0 +1,233 @@
+app:
+  description: 一个记得你上次干了什么的酒馆 NPC。Dify 负责编排，seekdb 存设定与玩家档案，PowerContext 存记忆。
+  icon: 🍶
+  icon_background: '#FFEAD5'
+  mode: advanced-chat
+  name: 记忆酒馆·老陈
+  use_icon_as_answer_icon: false
+dependencies: []
+kind: app
+version: 0.1.5
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      enabled: false
+    opening_statement: '「又是你。」老陈抬了下眼皮，「坐吧，别碰后院的猫。」'
+    retriever_resource:
+      enabled: false
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+      - data:
+          isInIteration: false
+          sourceType: start
+          targetType: http-request
+        id: e-start-recall
+        source: start
+        target: recall
+      - data:
+          isInIteration: false
+          sourceType: http-request
+          targetType: http-request
+        id: e-recall-lore
+        source: recall
+        target: lore
+      - data:
+          isInIteration: false
+          sourceType: http-request
+          targetType: llm
+        id: e-lore-llm
+        source: lore
+        target: llm
+      - data:
+          isInIteration: false
+          sourceType: llm
+          targetType: http-request
+        id: e-llm-remember
+        source: llm
+        target: remember
+      - data:
+          isInIteration: false
+          sourceType: http-request
+          targetType: answer
+        id: e-remember-answer
+        source: remember
+        target: answer
+    nodes:
+      - data:
+          type: start
+          title: 开始
+          variables:
+            - label: 玩家
+              max_length: 64
+              options: []
+              required: true
+              type: text-input
+              variable: player
+            - label: 你说的话
+              max_length: 512
+              options: []
+              required: true
+              type: paragraph
+              variable: query
+        id: start
+        position:
+          x: 30
+          y: 258
+        type: custom
+      - data:
+          type: http-request
+          title: 召回记忆
+          method: post
+          url: http://host.docker.internal:9300/mem/recall
+          headers: 'Content-Type: application/json'
+          params: ''
+          body:
+            type: json
+            data:
+              - key: player
+                type: text
+                value: '{{#start.player#}}'
+              - key: query
+                type: text
+                value: '{{#start.query#}}'
+          authorization:
+            type: no-auth
+            config: null
+          timeout:
+            max_connect_timeout: 10
+            max_read_timeout: 30
+            max_write_timeout: 30
+          variables: []
+        id: recall
+        position:
+          x: 300
+          y: 258
+        type: custom
+      - data:
+          type: http-request
+          title: 检索酒馆设定
+          method: post
+          url: http://host.docker.internal:9300/lore/search
+          headers: 'Content-Type: application/json'
+          params: ''
+          body:
+            type: json
+            data:
+              - key: query
+                type: text
+                value: '{{#start.query#}}'
+              - key: limit
+                type: number
+                value: '2'
+          authorization:
+            type: no-auth
+            config: null
+          timeout:
+            max_connect_timeout: 10
+            max_read_timeout: 30
+            max_write_timeout: 30
+          variables: []
+        id: lore
+        position:
+          x: 570
+          y: 258
+        type: custom
+      - data:
+          type: llm
+          title: 老陈回话
+          model:
+            provider: langgenius/ollama/ollama
+            name: qwen2.5:7b
+            mode: chat
+            completion_params:
+              temperature: 0.8
+              max_tokens: 512
+          prompt_template:
+            - role: system
+              text: '你是「醉三更」酒馆的老板老陈，五十来岁，左脸有疤，嘴硬心软。
+
+                你记得每个熟客做过的事，会自然地翻旧账，但不刻薄到底。
+
+                ---- 你记得的关于这个人的事（可能为空）----
+
+                {{#recall.body#}}
+
+                ---- 酒馆设定（说话要有依据，不要编造设定之外的东西）----
+
+                {{#lore.body#}}
+
+                ---- 规则 ----
+
+                1. 只输出老陈说的话与必要的动作描写，1-3 句，口语化，南方县城酒馆味道；
+
+                2. 如果记忆里有相关旧事，必须自然地提一句，不要生硬罗列；
+
+                3. 设定里没有的信息（如当天排队、天气、别人的隐私）一律不编，可以说"我哪知道"；
+
+                4. 不要出现"作为 AI""我是模型"之类的话。'
+            - role: user
+              text: '{{#start.query#}}'
+          vision:
+            enabled: false
+          variables: []
+        id: llm
+        position:
+          x: 840
+          y: 258
+        type: custom
+      - data:
+          type: http-request
+          title: 写入记忆
+          method: post
+          url: http://host.docker.internal:9300/mem/remember
+          headers: 'Content-Type: application/json'
+          params: ''
+          body:
+            type: json
+            data:
+              - key: player
+                type: text
+                value: '{{#start.player#}}'
+              - key: text
+                type: text
+                value: '玩家说：{{#start.query#}}；老陈答：{{#llm.text#}}'
+          authorization:
+            type: no-auth
+            config: null
+          timeout:
+            max_connect_timeout: 10
+            max_read_timeout: 30
+            max_write_timeout: 30
+          variables: []
+        id: remember
+        position:
+          x: 1110
+          y: 258
+        type: custom
+      - data:
+          type: answer
+          title: 直接回复
+          answer: '{{#llm.text#}}'
+          variables: []
+        id: answer
+        position:
+          x: 1380
+          y: 258
+        type: custom
+    viewport:
+      x: 0
+      y: 0
+      zoom: 0.7
