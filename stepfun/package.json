@@ -15,6 +15,10 @@
     "bench:batch": "node scripts/bench-batch.mjs",
     "bench:e2e": "node scripts/bench-e2e.mjs",
     "trace:sql": "node scripts/trace-sql.mjs",
+    "bench:browser": "node scripts/bench-browser.mjs --label webgpu --reset --url http://127.0.0.1:7860/?device=webgpu",
+    "bench:browser:wasm": "node scripts/bench-browser.mjs --label wasm --reset --url http://127.0.0.1:7860/?device=wasm",
+    "bench:browser:degrade": "node scripts/bench-browser.mjs --label wasm-degrade --reset --no-webgpu",
+    "bench:browser:summary": "node scripts/summarize-browser.mjs",
     "bench:all": "npm run bench:size && npm run bench:quality && npm run bench:batch && npm run bench:e2e && npm run trace:sql"
   },
   "dependencies": {

@@ -8,8 +8,11 @@ const DEFAULT_DTYPE = { webgpu: 'fp16', wasm: 'q8' };
 async function loadTransformers() {
   // 优先用本地 node_modules 里的副本（由后端 /vendor/ 提供），失败再走 CDN
   try {
-    return await import('/vendor/@huggingface/transformers/dist/transformers.min.js');
+    const mod = await import('/vendor/@huggingface/transformers/dist/transformers.min.js');
+    self.postMessage({ type: 'log', message: 'transformers.js：本地 /vendor 副本' });
+    return mod;
   } catch (e) {
+    self.postMessage({ type: 'log', message: `本地 /vendor 加载失败（${e?.message || e}），改用 CDN` });
     const cdn = 'https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1/dist/transformers.min.js';
     return import(/* @vite-ignore */ cdn);
   }
@@ -21,6 +24,13 @@ async function buildPipeline({ model, dtype, device, modelHost }) {
   if (env) {
     env.allowLocalModels = false;
     if (modelHost) env.remoteHost = modelHost;
+    // onnxruntime-web 的 wasm/mjs 运行时默认从 jsDelivr 拉；这里改成同一份本地副本，
+    // 既避免外网依赖（离线/内网可用），也避免 CDN 版本与应用内的 transformers 版本对不上。
+    if (env.backends?.onnx?.wasm) {
+      env.backends.onnx.wasm.wasmPaths = new URL('/vendor/@huggingface/transformers/dist/', self.location.href).href;
+      // 没有 COOP/COEP 就没有 SharedArrayBuffer，多线程 wasm 会失败，显式单线程更稳
+      env.backends.onnx.wasm.numThreads = 1;
+    }
   }
   const opts = {
     dtype,
@@ -70,7 +80,10 @@ async function embed(msg) {
 
   for (let i = 0; i < texts.length; i += batchSize) {
     const batch = texts.slice(i, i + batchSize);
+    if (i === 0) self.postMessage({ type: 'log', message: `推理开始：${texts.length} 条，batch=${batchSize}` });
+    const t1 = performance.now();
     const out = await pipe(batch, { pooling: 'mean', normalize: true });
+    if (i === 0) self.postMessage({ type: 'log', message: `首批推理完成：${batch.length} 条 / ${Math.round(performance.now() - t1)} ms` });
     const rows = out.tolist();
     for (const row of rows) vectors.push(row);
     self.postMessage({ type: 'progress', id: msg.id, done: vectors.length, total: texts.length });

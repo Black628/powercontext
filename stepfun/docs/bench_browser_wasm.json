@@ -1,0 +1,143 @@
+{
+  "label": "wasm",
+  "when": "2026-10-30T05:29:59.484Z",
+  "url": "http://127.0.0.1:7860/?device=wasm",
+  "query": "怎么在 AMD 上部署 seekdb",
+  "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/156.0.0.0 Safari/537.36",
+  "webgpuExposed": true,
+  "headful": false,
+  "chromeFlags": [
+    "--remote-debugging-port=9333",
+    "--user-data-dir=C:\\Users\\WZB\\Documents\\deepseek-harness\\default-workspace\\powercontext-eco\\stepfun\\.tmp\\chrome-kb-wasm",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-extensions",
+    "--hide-scrollbars",
+    "--window-size=1440,1100",
+    "--headless=new"
+  ],
+  "repeatCheckbox": true,
+  "repeatRequested": 5,
+  "freshProfile": false,
+  "resetCollection": true,
+  "modelLoadedMs": 1335,
+  "importWallMs": 2030,
+  "searchWallMs": 1015,
+  "kb": {
+    "ready": true,
+    "backend": "wasm",
+    "dtype": "q8",
+    "adapter": "nvidia / blackwell /",
+    "forcedDevice": "wasm",
+    "docs": 6,
+    "metrics": {
+      "import": {
+        "docs": 6,
+        "embedMs": 878.5999999940395,
+        "writeMs": 141.6712000000116,
+        "refreshMs": 561.3962999999931,
+        "totalMs": 1587.0999999940395,
+        "backend": "wasm",
+        "dtype": "q8"
+      },
+      "search": {
+        "query": "怎么在 AMD 上部署 seekdb",
+        "topK": 5,
+        "repeat": 5,
+        "backend": "wasm",
+        "dtype": "q8",
+        "qEmbedMs": 7.200000002980232,
+        "dbMs": 4.711599999980535,
+        "e2eMs": 14.100000008940697,
+        "samples": {
+          "qEmbed": [
+            7.4000000059604645,
+            7.200000002980232,
+            6.4000000059604645,
+            6.5999999940395355,
+            7.200000002980232
+          ],
+          "db": [
+            20.77150000000256,
+            4.711599999980535,
+            4.306400000001304,
+            4.377600000007078,
+            5.056700000015553
+          ],
+          "e2e": [
+            31.19999998807907,
+            14.100000008940697,
+            12.700000002980232,
+            13.199999988079071,
+            14.300000011920929
+          ]
+        },
+        "hits": 5
+      }
+    },
+    "status": {
+      "import": "向量化 1/1",
+      "search": "命中 5 条 · 中位数（5 次） · 端到端 14.1 ms"
+    }
+  },
+  "dom": {
+    "backend": "后端：WASM · Q8",
+    "model": "模型：Xenova/all-MiniLM-L6-v2",
+    "db": "seekdb：edge_kb · 6 条",
+    "load": "0.51 s",
+    "embed": "0.88 s (6.8 片/秒)",
+    "write": "0.70 s（其中刷新 0.56 s）",
+    "qembed": "7.2 ms",
+    "dbMs": "4.7 ms",
+    "e2e": "14.1 ms",
+    "importStatus": "向量化 1/1",
+    "searchStatus": "命中 5 条 · 中位数（5 次） · 端到端 14.1 ms",
+    "collection": "集合：edge_kb（384 维）· 当前 6 条",
+    "rows": [
+      {
+        "head": "#1score 0.0328",
+        "src": "amd-radeon.md#0",
+        "doc": "# 在 AMD Radeon 平台部署 seekdb\n\n## 申请资源\n\n登录 AMD 平台账号，进入 Active Instance 申请算力，选择带 GPU 的实例启动。\n实验环境启动后进入 Notebook，打开 Terminal 即"
+      },
+      {
+        "head": "#2score 0.0320",
+        "src": "fulltext-index.md#0",
+        "doc": "# seekdb 全文索引与分词器\n\n## 全文索引怎么用\n\n建表后可以直接加全文索引，指定分词器：\n\n```sql\nALTER TABLE docs ADD FULLTEXT INDEX fti_ik(title, content) WI"
+      },
+      {
+        "head": "#3score 0.0315",
+        "src": "amd-radeon.md#1",
+        "doc": "部署成功后，在运行目录下的 run/telemetry.json 中读取 content.id，即 36 位 UUID。\n\n```bash\npython3 -c 'import json; print(json.load(open(\"run"
+      },
+      {
+        "head": "#4score 0.0315",
+        "src": "edge-embedding.md#0",
+        "doc": "# 端侧向量化与知识库检索\n\n## 为什么要端侧推理\n\n在浏览器里跑 embedding 模型，文档不需要离开用户设备，隐私与延迟都更友好。\n模型首次从 CDN 下载并缓存到浏览器 Cache Storage，之后离线也能用。\n\n## 量化"
+      },
+      {
+        "head": "#5score 0.0308",
+        "src": "fulltext-index.md#1",
+        "doc": "seekdb 自带 ik、beng、space、ngram、ngram2 等分词器。\nik 面向中文，支持 smart 与 max_word 两种模式；beng 面向英文；\nngram 适合没有空格分隔的语言或模糊匹配场景。\n\n## 分词热"
+      }
+    ],
+    "log": [
+      "[13:29:55] 推理开始：6 条，batch=8",
+      "[13:29:55] 首批推理完成：6 条 / 878 ms",
+      "[13:29:56] 导入完成 6 片 / 3 个文件，总耗时 1.59 s",
+      "[13:29:57] 推理开始：1 条，batch=1",
+      "[13:29:57] 首批推理完成：1 条 / 7 ms",
+      "[13:29:57] 推理开始：1 条，batch=1",
+      "[13:29:57] 首批推理完成：1 条 / 7 ms",
+      "[13:29:57] 推理开始：1 条，batch=1",
+      "[13:29:57] 首批推理完成：1 条 / 6 ms",
+      "[13:29:57] 推理开始：1 条，batch=1",
+      "[13:29:57] 首批推理完成：1 条 / 7 ms",
+      "[13:29:57] 推理开始：1 条，batch=1",
+      "[13:29:57] 首批推理完成：1 条 / 7 ms",
+      "[13:29:57] 检索 \"怎么在 AMD 上部署 seekdb\"：db=4.7 ms 端到端=14.1 ms 命中=5"
+    ]
+  },
+  "consoleErrors": [
+    "Failed to load resource: the server responded with a status of 404 (Not Found)"
+  ]
+}

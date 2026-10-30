@@ -5,3 +5,6 @@ Thumbs.db
 *.local
 .env
 bench-*.json
+
+# 浏览器实测用的临时 profile
+.tmp/

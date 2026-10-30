@@ -98,6 +98,23 @@ npm start            # 默认 http://127.0.0.1:7860
 默认策略：`navigator.gpu` 可用 → `webgpu + fp16`；不可用 → `wasm + q8`。
 WebGPU 初始化失败会自动回落到 `wasm + q8`，并在顶部徽章与日志里写明原因。
 
+想看后端切换的效果，不必改代码，直接用 URL 参数固定：
+
+```
+http://127.0.0.1:7860/?device=webgpu   # 强制 WebGPU（不可用则自动降级）
+http://127.0.0.1:7860/?device=wasm     # 强制 WASM，用于对照实验
+```
+
+**浏览器实测（Chrome 156 + NVIDIA Blackwell，详见 [`docs/BROWSER_BENCH.md`](docs/BROWSER_BENCH.md)）**
+
+| 配置 | 模型加载（冷 / 热） | 6 片向量化 | 查询向量化 | seekdb 检索 | 端到端 |
+| --- | --- | --- | --- | --- | --- |
+| WebGPU + FP16 | 8.74 s / 0.89 s | 897 ms / **107 ms** | 10.2 / 9.1 ms | 4.9 / 4.7 ms | 17.6 / 16.3 ms |
+| WASM + INT8 | 12.14 s / 0.51 s | 1054 ms / 879 ms | 7.6 / 7.2 ms | 4.6 / 4.7 ms | 15.3 / 14.1 ms |
+
+WebGPU 在**批量**向量化上约快 8×（56 片/s vs 6.8 片/s）；单条查询两者接近。
+抹掉 `navigator.gpu` 模拟“不支持 WebGPU”的环境时，页面自动选 WASM 并在日志里说明，流程照常可跑。
+
 强制切换某一种做对比测试（浏览器控制台）：
 
 ```js
@@ -132,12 +149,16 @@ stepfun/
 │   ├── bench-batch.mjs        # 批大小对吞吐的影响
 │   ├── bench-search-modes.mjs # 混合检索 vs 纯向量检索耗时对照
 │   ├── bench-startup.mjs      # 启动耗时
+│   ├── bench-browser.mjs      # 真实 Chrome（CDP）跑浏览器侧实测 + 截图
+│   ├── summarize-browser.mjs  # 汇总 bench_browser_*.json 成一张表
 │   └── trace-sql.mjs          # 抓 seekdb 实际执行的 SQL（合规性证据）
 └── docs/
-    ├── TECH_REPORT.md   # 一页技术说明（含实测体积/质量/性能）
-    ├── BENCHMARK.md     # 测试方法、命令、样本数、中位数、环境
-    ├── SQL_EVIDENCE.md  # 混合检索在 seekdb 内完成的证据（SQL + DDL + 行数）
-    └── bench_*.json     # 上述脚本产出的原始数据
+    ├── TECH_REPORT.md    # 一页技术说明（含实测体积/质量/性能）
+    ├── BENCHMARK.md      # Node 侧测试方法、命令、样本数、中位数、环境
+    ├── BROWSER_BENCH.md  # 浏览器侧实测：WebGPU/WASM、冷热启动、降级
+    ├── SQL_EVIDENCE.md   # 混合检索在 seekdb 内完成的证据（SQL + DDL + 行数）
+    ├── screenshots/      # 浏览器实测截图
+    └── bench_*.json      # 上述脚本产出的原始数据
 ```
 
 ## 6. 数据与集合设计
@@ -229,13 +250,19 @@ node scripts/bench-startup.mjs
 # 7) 混合检索合规性证据：抓 seekdb 实际执行的 SQL + 集合 DDL
 node scripts/trace-sql.mjs        # 产出 docs/SQL_EVIDENCE.md 与 docs/sql_trace.json
 
-# 8) 一条命令跑完（不含 bench-startup，因为它要独占端口）
+# 8) 浏览器侧实测（自己起 headless Chrome，跑完导出 JSON + 截图）
+#    需要本机有 Chrome；--fresh 清 profile 测冷启动，--reset 先清空集合
+node scripts/bench-browser.mjs --label webgpu --reset --fresh --url "http://127.0.0.1:7860/?device=webgpu"
+node scripts/bench-browser.mjs --label wasm   --reset --fresh --url "http://127.0.0.1:7860/?device=wasm"
+node scripts/bench-browser.mjs --label wasm-degrade --reset --no-webgpu   # 模拟无 WebGPU，验证降级
+node scripts/summarize-browser.mjs
+
+# 9) 一条命令跑完 Node 侧基准（不含 bench-startup，因为它要独占端口）
 npm run bench:all
 ```
 
-每个脚本都会把原始样本写到 `docs/bench_*.json`，`docs/TECH_REPORT.md` 与 `docs/BENCHMARK.md` 里的
-表格就是这些文件的摘要。**浏览器侧（WebGPU/WASM）的数字必须按 `docs/BENCHMARK.md` 第 7 节在页面上采集**，
-仓库里没有、也不应该有伪造的浏览器数据。
+每个脚本都会把原始样本写到 `docs/bench_*.json`，`docs/TECH_REPORT.md`、`docs/BENCHMARK.md`、`docs/BROWSER_BENCH.md`
+里的表格就是这些文件的摘要。**浏览器数字全部来自 `bench-browser.mjs` 的真实页面运行**，没有手写或推测值。
 
 ## 11. 与验收标准对照
 
@@ -244,21 +271,22 @@ npm run bench:all
 | 完整流程 | 导入 → 向量化 → 写入 → 查询 → 展示排序结果与原文 |
 | 本地推理 | 推理全部在 `web/worker.js`，服务端无任何 embedding 调用（`createCollection` 不设 embeddingFunction） |
 | 模型量化 | `dtype` 切换 fp32/q8/fp16；体积 86.20 / 43.20 / 21.91 MiB，压缩比 1.00× / 2.00× / 3.94× |
-| 后端与降级 | 优先 WebGPU，失败自动降级 WASM，徽章与日志明确提示（浏览器侧行为本次未实测，见 BENCHMARK 第 5 节） |
+| 后端与降级 | 优先 WebGPU，失败自动降级 WASM，徽章与日志明确提示；两条路径都实测过（`docs/BROWSER_BENCH.md` 第 1、2 节 + `docs/screenshots/`） |
 | seekdb 数据层 | 向量/原文/元数据在 seekdb，`hybridSearch` 在库内完成 RRF（`docs/SQL_EVIDENCE.md`） |
 | 状态与刷新 | 每次写入后 `refresh_index()`，支持增量导入与集合切换 |
 | 可复现 | 第 2、3、10 节；示例语料在 `data/corpus/`；所有数字有原始 JSON |
 
 ## 12. 已知限制（如实说明）
 
-- **浏览器侧指标未实测**：本次交付在无 GUI 的环境里完成，WebGPU/WASM 的毫秒数与"禁用 WebGPU 自动降级"
-  只做了代码路径核对，没有真实跑过。`docs/BENCHMARK.md` 第 5、7 节写了原因和 3 分钟复测步骤。
-- **Node 数字不等于浏览器数字**：`docs/BENCHMARK.md` 里的向量化/检索性能来自 Node + onnxruntime-node（CPU EP），
-  与浏览器同模型同权重，但执行器不同，只能当对照参考。
-- Windows 只能用 server 模式（嵌入式 seekdb 不支持 Windows），所以本机开发需要一台能连的 seekdb。
+- **语料规模小**：只有 3 篇 / 6 片（420 字切片），所以"K=5"覆盖了候选池的很大比例，Recall 的区分度有限；
+  检索延迟（4.6 ms）也只代表这个量级的数据，没有做大库压测。这条写在 `docs/BENCHMARK.md` 第 4.3 节与
+  `docs/BROWSER_BENCH.md` 第 5 节。
+- **冷启动受网络影响**：浏览器冷启动 8.7–17 s 主要是下载模型（22 MB / 43 MB），换网络会变；热启动 0.5–0.9 s
+  才是本地推理的真实开销。
+- **WebGPU 优势在批量**：单条查询 WebGPU 并不比 WASM 快（9 ms vs 7 ms），因为一条文本撑不起 GPU 调度开销；
+  批量向量化时差距才拉开（56 片/s vs 6.8 片/s）。
+- Windows 只能用 server 模式（嵌入式 seekdb 对 Windows 的支持有限），所以本机开发需要一台能连的 seekdb。
 - `whereDocument.$contains` 走的是 seekdb 的全文检索语义；如果查询词在语料里没有精确 token，
   全文这一路会召回空，此时结果等价于纯向量检索（RRF 会自然退化为单路），属预期行为。
-- 语料只有 3 篇（6～14 片），所以"K=5"覆盖了候选池的很大比例，Recall 的区分度有限；
-  这是测量口径问题，已写在 `docs/BENCHMARK.md` 第 4.3 节。
 - 本机 `npm`（8.19.4，内部 node v16）不会装 `sharp` 的 win32 可选二进制，Node 侧 bench 脚本第一次跑需要
   `npm install --no-save @img/sharp-win32-x64@0.34.5`；`npm start` / `npm run smoke` 不受影响。

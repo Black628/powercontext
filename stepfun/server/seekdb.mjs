@@ -8,6 +8,20 @@ let collectionPromise = null;
 // 实际连上的端口（config.seekdb.port 可能被自动探测改写），供 /api/health 暴露
 export const resolved = { port: null };
 
+// seekdb 侧可能因为空闲/重启把 mysql 连接关掉，这里在"连接已关闭"时重建一次再重试，
+// 避免第一次导入或检索直接 500（评测时常见：先起库、隔一会儿再点导入）。
+const CONN_LOST = /closed state|PROTOCOL_CONNECTION_LOST|Connection lost|ECONNRESET|ER_CLIENT_INTERACTION_TIMEOUT/i;
+async function withReconnect(fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!CONN_LOST.test(err?.message || '')) throw err;
+    clientPromise = null;
+    collectionPromise = null;
+    return await fn();
+  }
+}
+
 async function importSdk() {
   const sdk = await import('seekdb');
   if (!sdk.SeekdbClient) {
@@ -140,6 +154,10 @@ export async function getCollection() {
  * 写完后调用 refresh_index()，保证 HNSW 异步索引对检索可见。
  */
 export async function ingest(rows) {
+  return withReconnect(() => ingestOnce(rows));
+}
+
+async function ingestOnce(rows) {
   if (!Array.isArray(rows) || rows.length === 0) {
     throw new Error('没有可写入的文档');
   }
@@ -181,7 +199,11 @@ export async function ingest(rows) {
  * 混合检索：全文（IK 分词）+ 向量，由 seekdb 内部 RRF 融合。
  * vector 来自浏览器；text 为原始查询串（不是向量）。
  */
-export async function search({ vector, text, topK }) {
+export async function search(params) {
+  return withReconnect(() => searchOnce(params));
+}
+
+async function searchOnce({ vector, text, topK }) {
   if (!Array.isArray(vector) || vector.length !== config.dimension) {
     throw new Error(`查询向量维度不正确：期望 ${config.dimension}`);
   }

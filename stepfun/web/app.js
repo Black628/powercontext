@@ -12,10 +12,20 @@ const state = {
   metrics: {},
 };
 
+// 允许用 ?device=wasm / ?device=webgpu 固定推理后端，方便做对照实验（默认自动选择）
+const params = new URLSearchParams(location.search);
+const forcedDevice = params.get('device');
+
 const log = (msg) => {
   const el = $('log');
   el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n`;
   el.scrollTop = el.scrollHeight;
+};
+
+// transformers.js 不同版本给的 progress 可能是 0~1 也可能是 0~100，统一成百分数
+const pct = (v) => {
+  const n = Number(v) || 0;
+  return Math.max(0, Math.min(100, n <= 1 ? n * 100 : n));
 };
 
 const fmt = (ms) => (Number.isFinite(ms) ? `${ms.toFixed(1)} ms` : '—');
@@ -50,11 +60,13 @@ function initWorker() {
         log('当前浏览器未检测到 WebGPU，已使用 WASM 后端');
       }
       log(`模型就绪：device=${msg.device} dtype=${msg.dtype} 加载 ${fmtSec(msg.loadMs)}`);
+    } else if (msg.type === 'log') {
+      log(msg.message);
     } else if (msg.type === 'download') {
-      $('import-status').textContent = `模型下载中… ${msg.file || ''} ${Math.round((msg.progress || 0) * 100)}%`;
+      $('import-status').textContent = `模型下载中… ${msg.file || ''} ${Math.round(pct(msg.progress))}%`;
     } else if (msg.type === 'progress') {
-      const pct = msg.total ? (msg.done / msg.total) * 100 : 0;
-      $('import-bar').style.width = `${pct}%`;
+      const ratio = msg.total ? (msg.done / msg.total) * 100 : 0;
+      $('import-bar').style.width = `${ratio}%`;
       $('import-status').textContent = `向量化 ${msg.done}/${msg.total}`;
     } else if (msg.type === 'error') {
       log(`错误(${msg.stage})：${msg.error}`);
@@ -303,13 +315,29 @@ async function boot() {
     await refreshHealth();
 
     const gpu = !!navigator.gpu;
-    log(`浏览器 WebGPU：${gpu ? '可用' : '不可用'}，将${gpu ? '优先使用 WebGPU' : '使用 WASM'}`);
+    const device = forcedDevice === 'wasm' || forcedDevice === 'webgpu' ? forcedDevice : gpu ? 'webgpu' : 'wasm';
+    log(
+      `浏览器 WebGPU：${gpu ? '可用' : '不可用'}；推理后端=${device}` +
+        (forcedDevice ? `（由 URL 参数固定：?device=${forcedDevice}）` : gpu ? '（自动优先 WebGPU）' : '（自动降级 WASM）')
+    );
+
+    if (gpu) {
+      try {
+        const adapter = await navigator.gpu.requestAdapter();
+        const info = adapter?.info || {};
+        state.adapter = adapter ? `${info.vendor || '?'} / ${info.architecture || '?'} / ${info.description || ''}`.trim() : 'no-adapter';
+        log(`WebGPU 适配器：${state.adapter}`);
+      } catch (err) {
+        state.adapter = `adapter 获取失败：${err.message}`;
+        log(`WebGPU 适配器获取失败：${err.message}`);
+      }
+    }
 
     state.worker.postMessage({
       type: 'init',
       model: cfg.modelId,
       modelHost: cfg.modelHost,
-      device: gpu ? 'webgpu' : 'wasm',
+      device,
     });
   } catch (err) {
     log(`初始化失败：${err.message}`);
@@ -337,7 +365,7 @@ $('dropzone').addEventListener('drop', (e) => importFiles([...e.dataTransfer.fil
 $('btn-sample').addEventListener('click', async (e) => {
   e.stopPropagation();
   try {
-    const names = ['seekdb-deploy.md', 'fulltext-index.md', 'amd-radeon.md'];
+    const names = ['edge-embedding.md', 'fulltext-index.md', 'amd-radeon.md'];
     const files = [];
     for (const name of names) {
       const resp = await fetch(`/data/corpus/${name}`);
@@ -386,6 +414,21 @@ $('btn-export').addEventListener('click', async () => {
     console.log(text);
     $('export-status').textContent = '剪贴板不可用，已打印到控制台';
   }
+});
+
+// 给自动化测试/截图用的只读快照（不含任何推理逻辑）
+window.__kb = () => ({
+  ready: state.ready,
+  backend: state.backend,
+  dtype: state.dtype,
+  adapter: state.adapter ?? null,
+  forcedDevice: forcedDevice ?? null,
+  docs: state.docs.length,
+  metrics: state.metrics,
+  status: {
+    import: $('import-status').textContent,
+    search: $('search-status').textContent,
+  },
 });
 
 boot();

@@ -4,8 +4,8 @@
 **产物**：浏览器本地完成向量化的迷你知识库，检索由 seekdb 的 `hybridSearch` 在库内完成向量 + 全文的 RRF 融合。
 
 > 所有数字都来自本机实跑，采集环境见 `docs/BENCHMARK.md` 第 0 节；原始样本存于 `docs/bench_*.json`。
-> **重要标注**：本文中的向量化/吞吐/延迟均来自 **Node + onnxruntime-node（CPU EP）**，与浏览器同一模型同一权重，
-> 但**不是浏览器数字**；浏览器（WebGPU/WASM）侧数值需按 `docs/BENCHMARK.md` 第 7 节在页面上复测。
+> 其中**浏览器侧**（WebGPU / WASM 的加载、向量化、检索、降级）另有一组实测，
+> 方法、原始 JSON 与截图见 `docs/BROWSER_BENCH.md`，本文第 2、4 节引用其结论。
 
 ---
 
@@ -48,11 +48,20 @@
 - **推理位置**：全部在 `web/worker.js`（Web Worker）里完成。服务端只收到「向量 + 原文」，`createCollection` 显式传
   `embeddingFunction: null`，从机制上排除服务端向量化；服务端代码里没有任何 embedding 调用。
 - **后端选择**：`navigator.gpu` 存在 → `device:'webgpu' + dtype:'fp16'`；否则 → `device:'wasm' + dtype:'q8'`。
+  页面顶部徽章常显 `后端：WebGPU · FP16` / `后端：WASM · Q8`，并用 `adapter.info` 打印实际 GPU。
+- **实测（Chrome 156，NVIDIA Blackwell，详见 `docs/BROWSER_BENCH.md`）**：
+
+  | 场景 | 模型加载 | 6 片向量化 | 查询向量化 | seekdb 检索 | 端到端 |
+  | --- | --- | --- | --- | --- | --- |
+  | WebGPU + FP16（冷 / 热） | 8.74 s / 0.89 s | 897 ms / **107 ms（56 片/s）** | 10.2 / 9.1 ms | 4.9 / 4.7 ms | 17.6 / 16.3 ms |
+  | WASM + INT8（冷 / 热） | 12.14 s / 0.51 s | 1054 ms / 879 ms（6.8 片/s） | 7.6 / 7.2 ms | 4.6 / 4.7 ms | 15.3 / 14.1 ms |
+
+  冷启动主要是下载模型（22–43 MB），热启动 0.5–0.9 s；WebGPU 的优势集中在**批量**向量化（约 8×），
+  单条查询两者接近（一条文本撑不起 GPU 调度开销）。
 - **自动降级**：WebGPU 初始化抛错时 worker 内部用 `wasm + q8` 重建 pipeline，把降级原因回传主线程；
-  顶部徽章变为 `后端：WASM · Q8`，日志写明 `已自动降级：WebGPU 初始化失败：…`；降级后导入与检索流程不变。
-- **可验证方式**：`chrome://gpu` 看 WebGPU 状态；或在浏览器 flags 里关掉 WebGPU，重开页面观察徽章与日志切换。
-- **诚实标注**：本次交付**没有在浏览器里跑过**（环境里没有可自动化的浏览器），所以 WebGPU/WASM 的具体毫秒数、
-  降级前后的 Top-5 一致性**未测**，`docs/BENCHMARK.md` 第 5、7 节写明了原因与替代证据，没有拿 Node 数字冒充。
+  徽章变为 `后端：WASM · Q8`，日志写 `已自动降级：WebGPU 初始化失败：…`。
+  另外「环境根本没有 WebGPU」也实测了：抹掉 `navigator.gpu` 后页面自动选 WASM，
+  徽章 `WASM · Q8`、日志 `未检测到 WebGPU，已使用 WASM 后端`，导入与检索完整可跑（`docs/screenshots/wasm-degrade.png`）。
 
 ## 3. seekdb 使用
 
@@ -92,15 +101,16 @@ ORDER BY `_score` DESC LIMIT 5
 - 增量导入：id = `文件名#片号@导入批次`，同一文件重复导入生成新 id，历史数据保留。
 - 前端把最近一次导入/检索指标存进 `state.metrics`，可一键导出 JSON。
 
-**优化点与实测效果（Node/CPU，均为真实测量）**
+**优化点与实测效果（Node/CPU 与浏览器两组，均为真实测量）**
 
 | 优化 | 做法 | 实测效果 |
 | --- | --- | --- |
 | 量化档位 | 只换 ONNX 权重，不动推理代码 | 体积 3.94× 压缩（FP32→INT8），检索质量 nDCG@5 0.620→0.618 |
-| 批处理 | 一次 `pipe(texts[])` 处理 batch 条（默认 8，可调） | **在本机 Node/CPU 上批处理没有收益**：420 字切片下 batch=8 只有 batch=1 的 0.53–0.55×（padding 到最长序列的开销超过并行收益）；200 字均匀切片下 q8 的 batch=4 为 1.15×。详见 BENCHMARK 第 6 节，浏览器侧需重测 |
-| 模型加载分离 | 模型只加载一次，加载耗时与推理耗时分开统计 | 缓存命中时模型加载 129 ms（q8）/137 ms（fp32），与推理分开计 |
-| 索引刷新时机 | 每批写入后刷新一次，而不是每条刷新 | 6 片一次写入：write 130.6 ms + refresh 716.1 ms（首次，含索引构建）；写入总量大时应按批而非按条刷新 |
-| 查询侧分段计时 | 向量化、HTTP、库内检索分别计时 | 端到端 51.1 ms = 向量化 2.25 ms + 往返 48.5 ms，其中库内 46.7 ms |
+| 推理后端 | 有 WebGPU 走 fp16，否则 WASM q8 | 热态批量向量化 **56.1 片/s（WebGPU） vs 6.8 片/s（WASM）**，约 8×；单条查询两者接近（9.1 vs 7.2 ms） |
+| 批处理 | 一次 `pipe(texts[])` 处理 batch 条（默认 8，可调） | 浏览器侧 batch=8 时 WebGPU 热态 6 片 107 ms；Node/CPU 上批处理反而变慢（padding 到最长序列的开销超过并行收益），说明收益强依赖后端，见 BENCHMARK 第 6 节 |
+| 模型加载分离 | 模型只加载一次，加载耗时与推理耗时分开统计 | 浏览器冷启动 8.74 s（WebGPU/fp16）/ 12.14 s（WASM/q8），热启动 0.89 s / 0.51 s；Node 侧缓存命中 129–137 ms |
+| 索引刷新时机 | 每批写入后刷新一次，而不是每条刷新 | 浏览器 6 片：write 100–142 ms + refresh 345–668 ms；刷新是写入侧最贵的一段，按批刷新比按条省得多 |
+| 查询侧分段计时 | 向量化、HTTP、库内检索分别计时 | 浏览器端到端 14–18 ms = 查询向量化 7–10 ms + 库内检索 4.6–4.9 ms + 往返/渲染；Node 侧 51.1 ms 中库内占 46.7 ms |
 
 **关键取舍**：混合检索不在客户端做，所以"融合质量"完全由 seekdb 的 RRF 决定；客户端能优化的只剩
 向量化吞吐、批量写入与刷新时机。本实现刻意让服务端保持"薄"，避免任何隐藏的服务端推理。
@@ -128,3 +138,10 @@ ORDER BY `_score` DESC LIMIT 5
    后果是**服务重启后第一次访问必 500**（`Duplicate entry 'edge_kb' for key 'idx_name'`），「清空集合」静默失败。
    已改为传字符串，并在元数据/表不一致时自愈重建。
 3. `reset()` 吞掉了所有异常，掩盖了上面这个 bug；现在只忽略 "not found"，其余错误如实抛出。
+4. 浏览器实测阶段发现 onnxruntime-web 的 wasm/mjs 默认从 jsDelivr 加载，和本地 `/vendor` 的 transformers 版本不一致时直接报
+   `no available backend found`。已在 worker 里把 `env.backends.onnx.wasm.wasmPaths` 指到本地 `/vendor/.../dist/`，
+   并设 `numThreads=1`（没有 COOP/COEP 就没有 SharedArrayBuffer）；现在断网也能跑。
+5. seekdb 侧空闲会关连接，应用重启后首次导入报 `Can't add new command when connection is in closed state`。
+   已加 `withReconnect`：命中连接类错误时重建 client/collection 并重试一次。
+6. 「加载示例语料」里写了一个不存在的文件名（`seekdb-deploy.md`），实际语料是 `edge-embedding.md`；
+   导致示例只导入 2 篇。已修正。下载进度按 0–1 与 0–100 两种口径兼容，不再显示 `10000%`。
