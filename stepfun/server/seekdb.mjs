@@ -8,17 +8,21 @@ let collectionPromise = null;
 // 实际连上的端口（config.seekdb.port 可能被自动探测改写），供 /api/health 暴露
 export const resolved = { port: null };
 
-// seekdb 侧可能因为空闲/重启把 mysql 连接关掉，这里在"连接已关闭"时重建一次再重试，
-// 避免第一次导入或检索直接 500（评测时常见：先起库、隔一会儿再点导入）。
-const CONN_LOST = /closed state|PROTOCOL_CONNECTION_LOST|Connection lost|ECONNRESET|ER_CLIENT_INTERACTION_TIMEOUT/i;
+// 两类"缓存失效"都靠重建再重试一次解决：
+//  1) seekdb 侧因为空闲/重启把 mysql 连接关掉；
+//  2) 集合被**另一个进程**删掉（例如页面开着时别人跑了 bench 脚本的 --reset，或另开了服务），
+//     本进程缓存的 collection 句柄指向已不存在的物理表，会一直报 Table ... doesn't exist。
+// 评测时这两种情况都很常见，不能靠重启服务解决。
+const CACHE_STALE =
+  /closed state|PROTOCOL_CONNECTION_LOST|Connection lost|ECONNRESET|ER_CLIENT_INTERACTION_TIMEOUT|doesn'?t exist|does not exist|table not found/i;
 async function withReconnect(fn) {
   try {
     return await fn();
   } catch (err) {
-    if (!CONN_LOST.test(err?.message || '')) throw err;
+    if (!CACHE_STALE.test(err?.message || '')) throw err;
     clientPromise = null;
     collectionPromise = null;
-    return await fn();
+    return await fn(); // 清缓存后重试一次：重连 + 集合不存在则按需重建
   }
 }
 
@@ -249,6 +253,10 @@ async function searchOnce({ vector, text, topK }) {
 }
 
 export async function stats() {
+  return withReconnect(statsOnce);
+}
+
+async function statsOnce() {
   const collection = await getCollection();
   let count = null;
   let countError = null;
@@ -260,7 +268,11 @@ export async function stats() {
       countError = null;
       break;
     } catch (err) {
-      countError = err?.message || String(err);
+      const msg = err?.message || String(err);
+      // 表被外部删掉这类错误必须往上抛，交给 withReconnect 清缓存后重建；
+      // 在这里吞掉就成了"永久 countError"，只有重启服务才能好。
+      if (CACHE_STALE.test(msg)) throw err;
+      countError = msg;
       if (attempt === 0) await new Promise((r) => setTimeout(r, 200));
     }
   }
@@ -268,6 +280,10 @@ export async function stats() {
 }
 
 export async function reset() {
+  return withReconnect(resetOnce);
+}
+
+async function resetOnce() {
   const client = await getClient();
   // 注意：seekdb-js 1.4.0 的 deleteCollection(name) 接收**字符串**；
   // 早先传 { name } 会被 validateCollectionName 拒绝并吞进 catch，
