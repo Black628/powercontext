@@ -367,14 +367,20 @@ $('btn-sample').addEventListener('click', async (e) => {
   try {
     const names = ['edge-embedding.md', 'fulltext-index.md', 'amd-radeon.md'];
     const files = [];
+    const missing = [];
     for (const name of names) {
       const resp = await fetch(`/data/corpus/${name}`);
-      if (!resp.ok) continue;
+      if (!resp.ok) {
+        // 静默跳过会让"示例语料只导了一半"看起来像 bug，这里把缺的文件写进日志
+        missing.push(`${name}(${resp.status})`);
+        continue;
+      }
       const text = await resp.text();
       files.push(new File([text], name, { type: 'text/markdown' }));
     }
+    if (missing.length) log(`示例语料缺失，已跳过：${missing.join(', ')}`);
     if (files.length) await importFiles(files);
-    else log('示例语料加载失败');
+    else log('示例语料加载失败：/data/corpus 下没有可读文件');
   } catch (err) {
     log(`示例语料加载失败：${err.message}`);
   }

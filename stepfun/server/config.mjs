@@ -11,8 +11,9 @@ export const config = {
   dimension: Number(process.env.EMBED_DIM || 384),
 
   // seekdb 服务端连接（Windows 下不支持嵌入式，必须用 server 模式）
-  // 本机实测 seekdb 监听 2882（2881 未监听），因此默认 2882；
-  // 未显式设置 SEEKDB_PORT 时，连接阶段还会按 probePorts 顺序探测可用端口。
+  // 端口不写死：部署方式不同，seekdb 可能听 2882 也可能听 2881
+  //（实测：Docker/原生实例多用 2882；WSL 里的 observer 听 2881，经 wslrelay 转发到 Windows 的 127.0.0.1:2881）。
+  // 未显式设置 SEEKDB_PORT 时，连接阶段按 probePorts 顺序逐个握手 select 1，采用第一个可用的。
   seekdb: {
     host: process.env.SEEKDB_HOST || '127.0.0.1',
     port: Number(explicitPort || 2882),

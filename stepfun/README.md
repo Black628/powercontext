@@ -115,6 +115,11 @@ http://127.0.0.1:7860/?device=wasm     # 强制 WASM，用于对照实验
 WebGPU 在**批量**向量化上约快 8×（56 片/s vs 6.8 片/s）；单条查询两者接近。
 抹掉 `navigator.gpu` 模拟“不支持 WebGPU”的环境时，页面自动选 WASM 并在日志里说明，流程照常可跑。
 
+> ⚠ **这张表的 seekdb 检索/端到端是 seekdb 与 Node 同机原生时的数字**。把 seekdb 放进 WSL、
+> 经 `wslrelay` 转发后，用同一脚本复测得到 seekdb 检索 **49.1 ms**、端到端 **59.9 ms**——
+> 差 10 倍全在库内检索这条路径上，向量化那两列几乎不变（7.6 ms）。两种环境都列在
+> [`docs/BROWSER_BENCH.md`](docs/BROWSER_BENCH.md) 第 6 节，复现时请对照自己机器的部署方式读数字。
+
 强制切换某一种做对比测试（浏览器控制台）：
 
 ```js

@@ -251,12 +251,20 @@ async function searchOnce({ vector, text, topK }) {
 export async function stats() {
   const collection = await getCollection();
   let count = null;
-  try {
-    count = typeof collection.count === 'function' ? await collection.count() : null;
-  } catch (_) {
-    count = null;
+  let countError = null;
+  // 建表瞬间偶发失败（元数据刚写、表还没就绪）时重试一次；
+  // 仍失败就把原因带出去，让 /api/health 能看到，而不是界面只显示一个无从判断的 "?"。
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      count = typeof collection.count === 'function' ? await collection.count() : null;
+      countError = null;
+      break;
+    } catch (err) {
+      countError = err?.message || String(err);
+      if (attempt === 0) await new Promise((r) => setTimeout(r, 200));
+    }
   }
-  return { collection: config.collection, dimension: config.dimension, count };
+  return { collection: config.collection, dimension: config.dimension, count, countError };
 }
 
 export async function reset() {

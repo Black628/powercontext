@@ -5,8 +5,9 @@
 //   node scripts/bench-browser.mjs --label wasm --query "怎么在 AMD 上部署 seekdb"
 //   CHROME_FLAGS="--headless=new --enable-unsafe-webgpu" node scripts/bench-browser.mjs --label webgpu
 //
-// 依赖：本机装有 Chrome，且 `npm start` 已在 --url 上监听。
+// 依赖：本机装有 Chrome **或 Edge**（自动发现，可用 CHROME_PATH 覆盖），且 `npm start` 已在 --url 上监听。
 import { spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 
@@ -27,8 +28,33 @@ const freshProfile = argv.includes('--fresh');
 const doReset = argv.includes('--reset');
 const repeat = Number(arg('repeat', '5'));
 const profileDir = resolve('.tmp', `chrome-kb-${label}`);
-const chromePath =
-  process.env.CHROME_PATH || 'C:/Users/WZB/AppData/Local/Google/Chrome/Application/chrome.exe';
+
+// 浏览器发现顺序：CHROME_PATH 显式指定 → 常见 Chrome 安装位置 → 系统 Edge。
+// 不写死某台机器的用户名路径，否则换机就报 ENOENT（Edge 基于 Chromium，CDP 同样可用）。
+function findBrowser() {
+  if (process.env.CHROME_PATH) return process.env.CHROME_PATH;
+  const candidates = [
+    `${process.env.PROGRAMFILES}/Google/Chrome/Application/chrome.exe`,
+    `${process.env['PROGRAMFILES(X86)']}/Google/Chrome/Application/chrome.exe`,
+    `${process.env.LOCALAPPDATA}/Google/Chrome/Application/chrome.exe`,
+    `${process.env.PROGRAMFILES}/Microsoft/Edge/Application/msedge.exe`,
+    `${process.env['PROGRAMFILES(X86)']}/Microsoft/Edge/Application/msedge.exe`,
+    '/usr/bin/google-chrome',
+    '/usr/bin/chromium',
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  ];
+  const hit = candidates.find((p) => p && existsSync(p));
+  if (!hit) {
+    console.error(
+      '找不到 Chrome/Edge。请安装其一，或用 CHROME_PATH 指定可执行文件：\n' +
+        '  $env:CHROME_PATH="C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"'
+    );
+    process.exit(2);
+  }
+  return hit;
+}
+
+const chromePath = findBrowser();
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
