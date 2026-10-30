@@ -1,0 +1,12 @@
+{
+  "engine": "seekdb + VSAG",
+  "n": 10000,
+  "dim": 128,
+  "M": 16,
+  "ef_construction": 200,
+  "rows": 10000,
+  "insert_ms": 792.4,
+  "build_index_ms": 3336.9,
+  "insert_rows_per_s": 12619.9,
+  "index_ddl_contains_vsag": true
+}

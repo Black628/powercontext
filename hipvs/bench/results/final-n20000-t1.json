@@ -1,0 +1,21 @@
+{
+  "n": 20000,
+  "dim": 128,
+  "kg_k": 32,
+  "M": 16,
+  "ef_construction": 200,
+  "threads": 1,
+  "repeat": 3,
+  "build_std_ms": 10927.8,
+  "build_kg_ms": 223.657,
+  "speedup": 48.8595,
+  "std_samples_ms": [10927.8, 11350.8, 10395.1],
+  "kg_samples_ms": [333.179, 223.657, 130.814],
+  "loadavg1": 17.2524,
+  "recall_std": 0.9195,
+  "recall_kg": 1,
+  "recall_kg_ef4x": 1,
+  "ef_search": 64,
+  "levels": 4,
+  "avg_degree_level0": 31.768
+}

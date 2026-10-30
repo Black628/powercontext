@@ -1,0 +1,7 @@
+# 生成物，不入库
+bench/out/
+bench/build/
+data/
+*.kg
+*.vec
+__pycache__/
